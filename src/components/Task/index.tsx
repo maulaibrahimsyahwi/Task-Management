@@ -1,10 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { TimeOutline } from "react-ionicons";
+import { DraggableProvided } from "@hello-pangea/dnd";
+import { Clock } from "lucide-react";
 import { TaskT } from "../../types";
 
 interface TaskProps {
   task: TaskT;
-  provided: any;
+  provided: DraggableProvided;
 }
 
 const Task = ({ task, provided }: TaskProps) => {
@@ -38,7 +38,7 @@ const Task = ({ task, provided }: TaskProps) => {
       <div className="w-full border border-dashed"></div>
       <div className="w-full flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <TimeOutline color={"#666"} width="19px" height="19px" />
+          <Clock color={"#666"} size={19} />
           <span className="text-[13px] text-gray-700">{deadline} mins</span>
         </div>
         <div
