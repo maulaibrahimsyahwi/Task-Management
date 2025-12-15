@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { getRandomColors } from "../../helpers/getRandomColors";
-// Kita hapus import uuidv4 karena ID akan dibuat otomatis oleh Firebase
+import { Trash } from "lucide-react";
 
 interface Tag {
   title: string;
@@ -14,26 +14,38 @@ interface AddModalProps {
   onClose: () => void;
   setOpen: React.Dispatch<React.SetStateAction<boolean>>;
   handleAddTask: (taskData: any) => void;
+  selectedTask?: any;
+  handleDeleteTask?: (taskId: string) => void;
 }
+
+const initialTaskData = {
+  title: "",
+  description: "",
+  priority: "",
+  deadline: 0,
+  image: "",
+  alt: "",
+  tags: [] as Tag[],
+};
 
 const AddModal = ({
   isOpen,
   onClose,
   setOpen,
   handleAddTask,
+  selectedTask,
+  handleDeleteTask,
 }: AddModalProps) => {
-  const initialTaskData = {
-    title: "",
-    description: "",
-    priority: "",
-    deadline: 0,
-    image: "",
-    alt: "",
-    tags: [] as Tag[],
-  };
-
   const [taskData, setTaskData] = useState(initialTaskData);
   const [tagTitle, setTagTitle] = useState("");
+
+  useEffect(() => {
+    if (selectedTask) {
+      setTaskData(selectedTask);
+    } else {
+      setTaskData(initialTaskData);
+    }
+  }, [selectedTask, isOpen]);
 
   const handleChange = (
     e: React.ChangeEvent<
@@ -72,11 +84,16 @@ const AddModal = ({
   };
 
   const handleSubmit = () => {
-    // Kirim data ke parent (Boards/index.tsx) untuk disimpan ke Firebase
     handleAddTask(taskData);
-    // Reset form
-    setTaskData(initialTaskData);
-    // Note: Modal ditutup oleh parent setelah sukses
+    if (!selectedTask) setTaskData(initialTaskData);
+  };
+
+  const onDelete = () => {
+    if (handleDeleteTask && selectedTask?.id) {
+      if (window.confirm("Are you sure you want to delete this task?")) {
+        handleDeleteTask(selectedTask.id);
+      }
+    }
   };
 
   return (
@@ -91,6 +108,21 @@ const AddModal = ({
         onClick={closeModal}
       ></div>
       <div className="md:w-[30vw] w-[90%] bg-white rounded-lg shadow-md z-50 flex flex-col items-center gap-3 px-5 py-6 relative">
+        <div className="w-full flex justify-between items-center mb-2">
+          <span className="text-lg font-bold text-gray-700">
+            {selectedTask ? "Edit Task" : "Add Task"}
+          </span>
+          {selectedTask && (
+            <button
+              onClick={onDelete}
+              className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
+              title="Delete Task"
+            >
+              <Trash size={20} />
+            </button>
+          )}
+        </div>
+
         <input
           type="text"
           name="title"
@@ -170,7 +202,7 @@ const AddModal = ({
           className="w-full mt-3 rounded-md h-9 bg-orange-400 text-blue-50 font-medium hover:bg-orange-500 transition-colors"
           onClick={handleSubmit}
         >
-          Submit Task
+          {selectedTask ? "Update Task" : "Submit Task"}
         </button>
       </div>
     </div>

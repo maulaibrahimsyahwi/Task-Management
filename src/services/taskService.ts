@@ -14,7 +14,6 @@ import { Columns, TaskT, ColumnData } from "../types";
 const TASK_COLLECTION = "tasks";
 const COLUMN_COLLECTION = "columns";
 
-// Fungsi inisialisasi default columns jika kosong
 const initializeDefaultColumns = async () => {
   const defaults = ["To Do", "Doing", "Done"];
   for (const name of defaults) {
@@ -26,23 +25,19 @@ const initializeDefaultColumns = async () => {
 };
 
 export const getBoardData = async (): Promise<Columns> => {
-  // 1. Ambil Data Kolom (Columns)
   const colRef = collection(db, COLUMN_COLLECTION);
   const qCol = query(colRef, orderBy("createdAt", "asc"));
   const colSnap = await getDocs(qCol);
 
-  // Jika kolom kosong, buat default dulu lalu refresh
   if (colSnap.empty) {
     await initializeDefaultColumns();
-    return getBoardData(); // Rekursif panggil ulang setelah create
+    return getBoardData();
   }
 
-  // 2. Siapkan struktur Board kosong berdasarkan kolom yang ada
   const board: Columns = {};
   const validColumnIds: string[] = [];
 
   colSnap.forEach((doc) => {
-    // PERBAIKAN: Gunakan tipe ColumnData di sini agar variabelnya terpakai
     const colData = doc.data() as ColumnData;
 
     board[doc.id] = {
@@ -52,7 +47,6 @@ export const getBoardData = async (): Promise<Columns> => {
     validColumnIds.push(doc.id);
   });
 
-  // 3. Ambil Data Tasks
   const taskSnap = await getDocs(collection(db, TASK_COLLECTION));
 
   taskSnap.forEach((docSnapshot) => {
@@ -68,7 +62,6 @@ export const getBoardData = async (): Promise<Columns> => {
       tags: data.tags || [],
     };
 
-    // Pastikan task masuk ke kolom yang valid (jika kolom dihapus, masuk ke kolom pertama/default)
     let status = data.status;
     if (!status || !board[status]) {
       status = validColumnIds[0];
@@ -82,13 +75,17 @@ export const getBoardData = async (): Promise<Columns> => {
   return board;
 };
 
-// Fungsi Tambah Kolom Baru
 export const addColumn = async (name: string) => {
   const docRef = await addDoc(collection(db, COLUMN_COLLECTION), {
     name,
     createdAt: Date.now(),
   });
   return { id: docRef.id, name };
+};
+
+export const deleteColumn = async (columnId: string) => {
+  const colRef = doc(db, COLUMN_COLLECTION, columnId);
+  await deleteDoc(colRef);
 };
 
 export const addTask = async (task: TaskT, status: string) => {
@@ -99,6 +96,12 @@ export const addTask = async (task: TaskT, status: string) => {
     status,
   });
   return { id: docRef.id, ...taskData };
+};
+
+export const updateTask = async (task: TaskT) => {
+  const { id, ...taskData } = task;
+  const taskRef = doc(db, TASK_COLLECTION, id);
+  await updateDoc(taskRef, { ...taskData });
 };
 
 export const updateTaskStatus = async (taskId: string, newStatus: string) => {
