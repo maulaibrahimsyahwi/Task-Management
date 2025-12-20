@@ -7,44 +7,53 @@ import {
   Bell,
   Users,
   PieChart,
+  ClipboardList,
 } from "lucide-react";
+import { NavLink } from "react-router-dom";
+import { useAuth } from "../../context/useAuth";
 
 const Sidebar = () => {
+  const { signOut } = useAuth();
   const navLinks = [
     {
       title: "Home",
       icon: <Home color="#555" size={22} />,
-      active: false,
+      to: "/home",
     },
     {
       title: "Boards",
       icon: <LayoutDashboard color="#555" size={22} />,
-      active: true,
+      to: "/boards",
+    },
+    {
+      title: "Backlog",
+      icon: <ClipboardList color="#555" size={22} />,
+      to: "/backlog",
     },
     {
       title: "Projects",
       icon: <Grid color="#555" size={22} />,
-      active: false,
+      to: "/projects",
     },
     {
       title: "Analytics",
       icon: <PieChart color="#555" size={22} />,
-      active: false,
+      to: "/analytics",
     },
     {
       title: "Workflows",
       icon: <Users color="#555" size={22} />,
-      active: false,
+      to: "/workflows",
     },
     {
       title: "Notifications",
       icon: <Bell color="#555" size={22} />,
-      active: false,
+      to: "/notifications",
     },
     {
       title: "Newsletter",
       icon: <Newspaper color="#555" size={22} />,
-      active: false,
+      to: "/newsletter",
     },
   ];
   return (
@@ -60,25 +69,32 @@ const Sidebar = () => {
       <div className="w-full h-[calc(100vh-70px)] border-r flex flex-col md:items-start items-center gap-2 border-slate-300 bg-[#fff] py-5 md:px-3 px-3 relative">
         {navLinks.map((link) => {
           return (
-            <div
+            <NavLink
               key={link.title}
-              className={`flex items-center gap-2 w-full rounded-lg hover:bg-orange-300 px-2 py-3 cursor-pointer ${
-                link.active ? "bg-orange-300" : "bg-transparent"
-              }`}
+              to={link.to}
+              className={({ isActive }) =>
+                `flex items-center gap-2 w-full rounded-lg hover:bg-orange-300 px-2 py-3 cursor-pointer ${
+                  isActive ? "bg-orange-300" : "bg-transparent"
+                }`
+              }
             >
               {link.icon}
               <span className="font-medium text-[15px] md:block hidden">
                 {link.title}
               </span>
-            </div>
+            </NavLink>
           );
         })}
-        <div className="flex absolute bottom-4 items-center md:justify-start justify-center gap-2 md:w-[90%] w-[70%] rounded-lg hover:bg-orange-300 px-2 py-3 cursor-pointer bg-gray-200">
+        <button
+          type="button"
+          onClick={signOut}
+          className="flex absolute bottom-4 items-center md:justify-start justify-center gap-2 md:w-[90%] w-[70%] rounded-lg hover:bg-orange-300 px-2 py-3 cursor-pointer bg-gray-200"
+        >
           <LogOut color="#555" size={22} />
           <span className="font-medium text-[15px] md:block hidden">
             Log Out
           </span>
-        </div>
+        </button>
       </div>
     </div>
   );

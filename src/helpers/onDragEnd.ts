@@ -3,15 +3,14 @@ import { Columns } from "../types";
 
 export const onDragEnd = (
   result: DropResult,
-  columns: Columns,
-  setColumns: (data: Columns) => void
-) => {
-  if (!result.destination) return;
+  columns: Columns
+): Columns => {
+  if (!result.destination) return columns;
 
   const { source, destination, type } = result;
 
   if (type === "COLUMN") {
-    if (source.index === destination.index) return;
+    if (source.index === destination.index) return columns;
 
     const entries = Object.entries(columns);
     const [removed] = entries.splice(source.index, 1);
@@ -22,8 +21,7 @@ export const onDragEnd = (
       newColumns[key] = value;
     });
 
-    setColumns(newColumns);
-    return;
+    return newColumns;
   }
 
   if (source.droppableId !== destination.droppableId) {
@@ -33,7 +31,7 @@ export const onDragEnd = (
     const destItems = [...destColumn.items];
     const [removed] = sourceItems.splice(source.index, 1);
     destItems.splice(destination.index, 0, removed);
-    setColumns({
+    return {
       ...columns,
       [source.droppableId]: {
         ...sourceColumn,
@@ -43,18 +41,18 @@ export const onDragEnd = (
         ...destColumn,
         items: destItems,
       },
-    });
+    };
   } else {
     const column = columns[source.droppableId];
     const copiedItems = [...column.items];
     const [removed] = copiedItems.splice(source.index, 1);
     copiedItems.splice(destination.index, 0, removed);
-    setColumns({
+    return {
       ...columns,
       [source.droppableId]: {
         ...column,
         items: copiedItems,
       },
-    });
+    };
   }
 };

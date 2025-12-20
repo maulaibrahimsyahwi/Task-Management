@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function memberDoc(boardId) {
+      return get(/databases/$(database)/documents/boardMembers/$(boardId + "_" + request.auth.uid));
+    }
+
+    function isBoardMember(boardId) {
+      return isSignedIn() && memberDoc(boardId).exists();
+    }
+
+    function isBoardAdmin(boardId) {
+      return isBoardMember(boardId) &&
+        (memberDoc(boardId).data.role == "owner" ||
+         memberDoc(boardId).data.role == "admin");
+    }
+
+    function isSelfMemberUpdate() {
+      return request.auth.uid == resource.data.uid &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.boardId == resource.data.boardId &&
+        request.resource.data.role == resource.data.role;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /boards/{boardId} {
+      allow read: if isBoardMember(boardId) ||
+        (boardId == "default" && isSignedIn()) ||
+        (resource.data.createdBy == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isBoardAdmin(boardId);
+    }
+
+    match /sprints/{sprintId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardAdmin(request.resource.data.boardId);
+      allow update, delete: if isBoardAdmin(resource.data.boardId);
+    }
+
+    match /boardMembers/{memberId} {
+      allow read: if isSignedIn() &&
+        (resource.data.uid == request.auth.uid || isBoardMember(resource.data.boardId));
+      allow create: if isSignedIn() &&
+        (request.resource.data.uid == request.auth.uid ||
+         isBoardAdmin(request.resource.data.boardId));
+      allow update: if isSignedIn() &&
+        (isBoardAdmin(resource.data.boardId) || isSelfMemberUpdate());
+      allow delete: if isSignedIn() && isBoardAdmin(resource.data.boardId);
+    }
+
+    match /columns/{columnId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardAdmin(request.resource.data.boardId);
+      allow update, delete: if isBoardAdmin(resource.data.boardId);
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardMember(request.resource.data.boardId);
+      allow update, delete: if isBoardMember(resource.data.boardId);
+    }
+
+    match /invites/{inviteId} {
+      allow read: if isSignedIn() && request.auth.token.email == resource.data.email;
+      allow create: if isBoardAdmin(request.resource.data.boardId);
+      allow update: if isSignedIn() && request.auth.token.email == resource.data.email;
+      allow delete: if isBoardAdmin(resource.data.boardId);
+    }
+
+    match /activity/{activityId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardMember(request.resource.data.boardId);
+      allow update, delete: if false;
+    }
+
+    match /automations/{ruleId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardAdmin(request.resource.data.boardId);
+      allow update, delete: if isBoardAdmin(resource.data.boardId);
+    }
+
+    match /taskComments/{commentId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardMember(request.resource.data.boardId);
+      allow update, delete: if false;
+    }
+
+    match /timeLogs/{logId} {
+      allow read: if isBoardMember(resource.data.boardId);
+      allow create: if isBoardMember(request.resource.data.boardId);
+      allow update, delete: if false;
+    }
+  }
+}
