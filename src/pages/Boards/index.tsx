@@ -11,7 +11,7 @@ import { useOutletContext, useParams } from "react-router";
 import { Link } from "react-router-dom";
 import { Columns, Column, TaskT } from "../../types";
 import { onDragEnd } from "../../helpers/onDragEnd";
-import { Plus, X, Trash2, Settings } from "lucide-react";
+import { Plus, X, Trash2, Settings, RefreshCw } from "lucide-react";
 import AddModal from "../../components/Modals/AddModal";
 import Task from "../../components/Task";
 import type { LayoutOutletContext } from "../../layout";
@@ -30,8 +30,12 @@ import {
   syncTaskOrders,
   updateColumnOrder,
   updateTaskFields,
+  createDefaultColumns,
 } from "../../services/taskService";
-import { logActivity, subscribeBoardMembers } from "../../services/collaborationService";
+import {
+  logActivity,
+  subscribeBoardMembers,
+} from "../../services/collaborationService";
 import { subscribeSprints } from "../../services/sprintService";
 import type { Sprint } from "../../types/sprints";
 import { subscribeAutomationRules } from "../../services/automationService";
@@ -51,6 +55,7 @@ const Home = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedColumn, setSelectedColumn] = useState("");
   const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskT | null>(null);
   const [isAddingColumn, setIsAddingColumn] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState("");
@@ -70,9 +75,9 @@ const Home = () => {
     due: "all",
     sprint: "all",
   });
-  const [swimlane, setSwimlane] = useState<
-    "none" | "assignee" | "priority"
-  >("none");
+  const [swimlane, setSwimlane] = useState<"none" | "assignee" | "priority">(
+    "none"
+  );
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const isSearching = normalizedSearch.length > 0;
@@ -120,7 +125,9 @@ const Home = () => {
       }
 
       if (filters.tag !== "all") {
-        const hasTag = (task.tags || []).some((tag) => tag.title === filters.tag);
+        const hasTag = (task.tags || []).some(
+          (tag) => tag.title === filters.tag
+        );
         if (!hasTag) return false;
       }
 
@@ -163,6 +170,7 @@ const Home = () => {
 
   useEffect(() => {
     if (!boardId) return;
+    setLoading(true);
     let didSet = false;
     const unsubscribe = subscribeBoardData(
       boardId,
@@ -201,6 +209,20 @@ const Home = () => {
     }
     return subscribeAutomationRules(boardId, setAutomationRules);
   }, [boardId]);
+
+  const handleInitializeBoard = async () => {
+    if (!boardId || initializing) return;
+    setInitializing(true);
+    try {
+      await createDefaultColumns(boardId);
+      addNotification("Board initialized successfully.");
+    } catch (e) {
+      console.error("Failed to init board", e);
+      addNotification("Failed to initialize board.");
+    } finally {
+      setInitializing(false);
+    }
+  };
 
   if (!boardId) {
     return (
@@ -257,9 +279,7 @@ const Home = () => {
     const current = columns[editingColumnId];
     if (!current) return;
     const nextName = columnNameDraft.trim() || current.name;
-    const parsedWip = columnWipDraft.trim()
-      ? Number(columnWipDraft)
-      : 0;
+    const parsedWip = columnWipDraft.trim() ? Number(columnWipDraft) : 0;
     const wipLimit = Number.isNaN(parsedWip) ? 0 : parsedWip;
     const stage = columnStageDraft || undefined;
 
@@ -313,9 +333,7 @@ const Home = () => {
       tasks.forEach((task) => {
         const key = task.assigneeId || "unassigned";
         const label =
-          key === "unassigned"
-            ? "Unassigned"
-            : nameById.get(key) || "Member";
+          key === "unassigned" ? "Unassigned" : nameById.get(key) || "Member";
         pushTask(key, label, task);
       });
       const orderedKeys = [
@@ -327,7 +345,11 @@ const Home = () => {
       );
       return [...orderedKeys, ...extraKeys]
         .map((key) => groups.get(key))
-        .filter(Boolean) as Array<{ key: string; label: string; tasks: TaskT[] }>;
+        .filter(Boolean) as Array<{
+        key: string;
+        label: string;
+        tasks: TaskT[];
+      }>;
     }
 
     const order = ["high", "medium", "low", "none"];
@@ -469,8 +491,8 @@ const Home = () => {
 
       if (user && nextAssigneeId && nextAssigneeId !== prevAssigneeId) {
         const assigneeName =
-          members.find((member) => member.uid === nextAssigneeId)?.displayName ||
-          "someone";
+          members.find((member) => member.uid === nextAssigneeId)
+            ?.displayName || "someone";
         void logActivity({
           boardId,
           actorUid: user.uid,
@@ -489,7 +511,8 @@ const Home = () => {
           const names = newlyMentioned
             .map(
               (id) =>
-                members.find((member) => member.uid === id)?.displayName || "someone"
+                members.find((member) => member.uid === id)?.displayName ||
+                "someone"
             )
             .join(", ");
           void logActivity({
@@ -524,7 +547,9 @@ const Home = () => {
       setColumns(newColumns);
       closeModal();
       addNotification(
-        existingTask?.title ? `Deleted task: ${existingTask.title}` : "Deleted task."
+        existingTask?.title
+          ? `Deleted task: ${existingTask.title}`
+          : "Deleted task."
       );
       if (user) {
         void logActivity({
@@ -616,8 +641,7 @@ const Home = () => {
 
     if (type !== "COLUMN" && source.droppableId !== destination.droppableId) {
       if (isWipBlocked(destination.droppableId)) {
-        const destName =
-          columns[destination.droppableId]?.name || "that list";
+        const destName = columns[destination.droppableId]?.name || "that list";
         addNotification(`WIP limit reached for ${destName}.`);
         return;
       }
@@ -704,6 +728,79 @@ const Home = () => {
     );
   }
 
+  // Jika tidak loading tapi kolom kosong, tampilkan tombol inisialisasi
+  if (Object.keys(columns).length === 0) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center py-12 gap-4">
+        <div className="text-xl font-bold text-gray-800">Ready to work?</div>
+        <div className="text-gray-600">
+          This board is empty. Initialize default lists to get started.
+        </div>
+        <button
+          onClick={handleInitializeBoard}
+          disabled={initializing}
+          className="flex items-center gap-2 px-5 py-2.5 bg-orange-400 text-white rounded-lg hover:bg-orange-500 disabled:opacity-50"
+        >
+          {initializing ? (
+            <>
+              <RefreshCw className="animate-spin" size={18} />
+              Initializing...
+            </>
+          ) : (
+            <>
+              <RefreshCw size={18} />
+              Initialize Board
+            </>
+          )}
+        </button>
+        {canManageLists && (
+          <div className="mt-4 text-sm text-gray-500">
+            Or use the button below to add a custom list manually.
+          </div>
+        )}
+        {canManageLists && (
+          <div className="mt-2 min-w-[300px]">
+            {/* Render add column UI manually here just in case user wants custom start */}
+            {!isAddingColumn ? (
+              <div
+                onClick={() => setIsAddingColumn(true)}
+                className="w-full rounded-lg p-3 flex items-center justify-center gap-2 font-medium bg-gray-100 hover:bg-gray-200 cursor-pointer text-gray-700"
+              >
+                <Plus size={20} />
+                <span>Add a custom list</span>
+              </div>
+            ) : (
+              <div className="w-full bg-white rounded-lg p-3 shadow-sm flex flex-col gap-2 border border-gray-200">
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Enter list title..."
+                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:border-orange-400"
+                  value={newColumnTitle}
+                  onChange={(e) => setNewColumnTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddColumn()}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAddColumn}
+                    className="px-3 py-1 bg-orange-400 text-white rounded text-sm hover:bg-orange-500"
+                  >
+                    Add list
+                  </button>
+                  <X
+                    size={20}
+                    className="cursor-pointer text-gray-500 hover:text-gray-700"
+                    onClick={() => setIsAddingColumn(false)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="w-full flex flex-col gap-4 pb-2">
@@ -716,7 +813,9 @@ const Home = () => {
               {activeBoard?.description || "Manage tasks and collaboration."}
             </div>
             <div className="text-xs text-gray-500 mt-1">
-              {activeSprint ? `Active sprint: ${activeSprint.name}` : "No active sprint"}
+              {activeSprint
+                ? `Active sprint: ${activeSprint.name}`
+                : "No active sprint"}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -772,7 +871,9 @@ const Home = () => {
           </select>
           <select
             value={filters.tag}
-            onChange={(e) => setFilters((prev) => ({ ...prev, tag: e.target.value }))}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, tag: e.target.value }))
+            }
             className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
           >
             <option value="all">All tags</option>
@@ -793,7 +894,9 @@ const Home = () => {
           </select>
           <select
             value={filters.due}
-            onChange={(e) => setFilters((prev) => ({ ...prev, due: e.target.value }))}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, due: e.target.value }))
+            }
             className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
           >
             <option value="all">All due dates</option>
@@ -901,7 +1004,10 @@ const Home = () => {
                                   {column.name}
                                   <span className="bg-gray-200 text-xs px-2 py-1 rounded-full text-gray-600">
                                     {isFiltering
-                                      ? `${column.items.filter(matchesFilters).length} / ${column.items.length}`
+                                      ? `${
+                                          column.items.filter(matchesFilters)
+                                            .length
+                                        } / ${column.items.length}`
                                       : column.wipLimit
                                       ? `${column.items.length} / ${column.wipLimit}`
                                       : column.items.length}
@@ -911,7 +1017,9 @@ const Home = () => {
                                   {canManageLists ? (
                                     <button
                                       type="button"
-                                      onClick={() => startEditColumn(columnId, column)}
+                                      onClick={() =>
+                                        startEditColumn(columnId, column)
+                                      }
                                       className="text-gray-400 hover:text-gray-700"
                                       title="Column settings"
                                     >
@@ -932,7 +1040,9 @@ const Home = () => {
                                     <input
                                       type="text"
                                       value={columnNameDraft}
-                                      onChange={(e) => setColumnNameDraft(e.target.value)}
+                                      onChange={(e) =>
+                                        setColumnNameDraft(e.target.value)
+                                      }
                                       className="w-full h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
                                       placeholder="List name"
                                     />
@@ -964,7 +1074,9 @@ const Home = () => {
                                         <option value="">Stage (auto)</option>
                                         <option value="backlog">Backlog</option>
                                         <option value="todo">To do</option>
-                                        <option value="in_progress">In progress</option>
+                                        <option value="in_progress">
+                                          In progress
+                                        </option>
                                         <option value="done">Done</option>
                                       </select>
                                     </div>
@@ -989,11 +1101,15 @@ const Home = () => {
                               ) : null}
 
                               {(() => {
-                                const visibleTasks = column.items.filter(matchesFilters);
+                                const visibleTasks =
+                                  column.items.filter(matchesFilters);
                                 const groups = getSwimlaneGroups(visibleTasks);
                                 let taskIndex = 0;
                                 return groups.map((group) => (
-                                  <div key={group.key} className="w-full flex flex-col gap-2">
+                                  <div
+                                    key={group.key}
+                                    className="w-full flex flex-col gap-2"
+                                  >
                                     {swimlane !== "none" ? (
                                       <div className="w-full text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
                                         {group.label}

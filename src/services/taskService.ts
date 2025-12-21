@@ -19,6 +19,7 @@ import { DEFAULT_BOARD_ID } from "./collaborationService";
 const TASK_COLLECTION = "tasks";
 const COLUMN_COLLECTION = "columns";
 
+// Menggunakan Batch agar pembuatan kolom lebih cepat dan stabil
 export const createDefaultColumns = async (boardId: string) => {
   const defaults: Array<{
     name: string;
@@ -28,16 +29,21 @@ export const createDefaultColumns = async (boardId: string) => {
     { name: "Doing", stage: "in_progress" },
     { name: "Done", stage: "done" },
   ];
+
   const base = Date.now();
-  for (let index = 0; index < defaults.length; index += 1) {
-    const { name, stage } = defaults[index];
-    await addDoc(collection(db, COLUMN_COLLECTION), {
-      name,
-      stage,
+  const batch = writeBatch(db);
+
+  defaults.forEach((def, index) => {
+    const newColRef = doc(collection(db, COLUMN_COLLECTION));
+    batch.set(newColRef, {
+      name: def.name,
+      stage: def.stage,
       createdAt: base + index,
       boardId,
     });
-  }
+  });
+
+  await batch.commit();
 };
 
 export const getBoardData = async (
@@ -49,6 +55,7 @@ export const getBoardData = async (
 
   if (colSnap.empty) {
     await createDefaultColumns(boardId);
+    // Recursively call to get the data after creation
     return getBoardData(boardId);
   }
 
@@ -60,6 +67,7 @@ export const getBoardData = async (
 
   return board;
 };
+
 const buildBoard = (
   colSnap: QuerySnapshot<DocumentData>,
   taskSnap: QuerySnapshot<DocumentData>
@@ -71,8 +79,7 @@ const buildBoard = (
         id: docSnapshot.id,
         name: data.name,
         createdAt: data.createdAt,
-        wipLimit:
-          typeof data.wipLimit === "number" ? data.wipLimit : undefined,
+        wipLimit: typeof data.wipLimit === "number" ? data.wipLimit : undefined,
         stage:
           data.stage === "backlog" ||
           data.stage === "todo" ||
@@ -99,11 +106,12 @@ const buildBoard = (
 
   taskSnap.forEach((docSnapshot) => {
     const data = docSnapshot.data();
+    // Validasi data task dasar
     const task: TaskT = {
       id: docSnapshot.id,
-      title: data.title,
-      description: data.description,
-      priority: data.priority,
+      title: data.title || "Untitled",
+      description: data.description || "",
+      priority: data.priority || "low",
       deadline:
         typeof data.deadline === "number"
           ? data.deadline
@@ -130,6 +138,7 @@ const buildBoard = (
 
     let status = data.status;
     if (!status || !board[status]) {
+      // Jika status tidak valid, masukkan ke kolom pertama
       status = validColumnIds[0];
     }
 
@@ -151,10 +160,12 @@ const buildBoard = (
 };
 
 export const subscribeBoardData = (
-  boardId = DEFAULT_BOARD_ID,
+  boardId: string,
   onChange: (columns: Columns) => void,
   onError?: (error: Error) => void
 ) => {
+  if (!boardId) return () => {};
+
   const colRef = collection(db, COLUMN_COLLECTION);
   const qCol = query(colRef, where("boardId", "==", boardId));
   const taskRef = query(
@@ -167,12 +178,20 @@ export const subscribeBoardData = (
   let initializing = false;
 
   const build = async () => {
+    // Tunggu sampai kedua snapshot tersedia
     if (!colSnap || !taskSnap) return;
 
+    // Jika kolom kosong dan belum proses inisialisasi, coba buat default
     if (colSnap.empty && !initializing) {
       initializing = true;
-      await createDefaultColumns(boardId);
-      initializing = false;
+      try {
+        await createDefaultColumns(boardId);
+      } catch (e) {
+        console.error("Auto-creation of columns failed", e);
+      } finally {
+        initializing = false;
+      }
+      // Kita return di sini agar snapshot berikutnya (setelah write) yang men-trigger update UI
       return;
     }
 
@@ -186,15 +205,16 @@ export const subscribeBoardData = (
       colSnap = snapshot;
       void build();
     },
-    onError
+    (error) => onError?.(error)
   );
+
   const unsubscribeTasks = onSnapshot(
     taskRef,
     (snapshot) => {
       taskSnap = snapshot;
       void build();
     },
-    onError
+    (error) => onError?.(error)
   );
 
   return () => {
@@ -203,9 +223,7 @@ export const subscribeBoardData = (
   };
 };
 
-export const migrateLegacyBoardData = async (
-  boardId = DEFAULT_BOARD_ID
-) => {
+export const migrateLegacyBoardData = async (boardId = DEFAULT_BOARD_ID) => {
   const [colSnap, taskSnap] = await Promise.all([
     getDocs(collection(db, COLUMN_COLLECTION)),
     getDocs(collection(db, TASK_COLLECTION)),
@@ -264,7 +282,8 @@ export const addColumn = async (
   return {
     id: docRef.id,
     name,
-    wipLimit: typeof options?.wipLimit === "number" ? options?.wipLimit : undefined,
+    wipLimit:
+      typeof options?.wipLimit === "number" ? options?.wipLimit : undefined,
     stage: options?.stage,
   };
 };
@@ -388,7 +407,9 @@ export const updateColumnOrder = async (orderedColumnIds: string[]) => {
   const base = Date.now();
   const batch = writeBatch(db);
   orderedColumnIds.forEach((columnId, index) => {
-    batch.update(doc(db, COLUMN_COLLECTION, columnId), { createdAt: base + index });
+    batch.update(doc(db, COLUMN_COLLECTION, columnId), {
+      createdAt: base + index,
+    });
   });
   await batch.commit();
 };
@@ -412,9 +433,7 @@ export const syncTaskOrders = async (columns: Columns, columnIds: string[]) => {
         taskId: task.id,
         status: columnId,
         order: index,
-        completedAt: isDone
-          ? task.completedAt ?? Date.now()
-          : deleteField(),
+        completedAt: isDone ? task.completedAt ?? Date.now() : deleteField(),
       });
     });
   });

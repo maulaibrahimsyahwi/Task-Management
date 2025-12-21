@@ -17,8 +17,13 @@ const describeProjectError = (e: unknown) => {
 };
 
 const Projects = () => {
-  const { projects, activeProjectId, setActiveProjectId, createProject, loading } =
-    useProjects();
+  const {
+    projects,
+    activeProjectId,
+    setActiveProjectId,
+    createProject,
+    loading,
+  } = useProjects();
   const { setActiveBoardId } = useBoards();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -32,15 +37,17 @@ const Projects = () => {
     setError(null);
     try {
       const created = await createProject({ name, description });
-        setName("");
-        setDescription("");
-        if (created) {
-          setActiveBoardId(created.boardId);
-          navigate(`/projects/board/${created.projectId}`);
-        }
-      } catch (e) {
-        setError(describeProjectError(e));
-      } finally {
+      setName("");
+      setDescription("");
+      if (created) {
+        setActiveBoardId(created.boardId);
+        navigate(`/projects/${created.projectId}`, {
+          state: { initialBoardId: created.boardId },
+        });
+      }
+    } catch (e) {
+      setError(describeProjectError(e));
+    } finally {
       setCreating(false);
     }
   };
@@ -128,7 +135,7 @@ const Projects = () => {
                   Select
                 </button>
                 <Link
-                  to={`/projects/board/${project.id}`}
+                  to={`/projects/${project.id}`}
                   onClick={() => setActiveProjectId(project.id)}
                   className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800"
                 >

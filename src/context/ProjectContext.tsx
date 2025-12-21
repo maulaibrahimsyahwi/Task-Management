@@ -22,13 +22,15 @@ const ACTIVE_PROJECT_STORAGE_KEY = "rtm_active_project_v1";
 export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const { user, profile } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProjectId, setActiveProjectIdState] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
-    } catch {
-      return null;
+  const [activeProjectId, setActiveProjectIdState] = useState<string | null>(
+    () => {
+      try {
+        return localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+      } catch {
+        return null;
+      }
     }
-  });
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -59,7 +61,10 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     const preferredId = profile?.defaultProjectId;
     const hasPreferred =
       preferredId && projects.some((p) => p.id === preferredId);
-    if (hasPreferred && (!activeProjectId || !projects.some((p) => p.id === activeProjectId))) {
+    if (
+      hasPreferred &&
+      (!activeProjectId || !projects.some((p) => p.id === activeProjectId))
+    ) {
       setActiveProjectIdState(preferredId);
       return;
     }
@@ -101,15 +106,18 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
         description: params.description,
         createdBy: user.uid,
       });
+
       const board = await createBoard({
         name: project.name,
         description: project.description,
         createdBy: user.uid,
         projectId: project.id,
       });
+
       await ensureBoardMember(board.id, user, "owner");
       await createDefaultColumns(board.id);
       await setProjectDefaultBoard(project.id, board.id);
+
       setActiveProjectId(project.id);
       return { projectId: project.id, boardId: board.id };
     },
@@ -117,7 +125,10 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const updateProject = useCallback(
-    async (projectId: string, updates: { name?: string; description?: string }) => {
+    async (
+      projectId: string,
+      updates: { name?: string; description?: string }
+    ) => {
       await updateProjectDoc(projectId, updates);
     },
     []
@@ -161,5 +172,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     ]
   );
 
-  return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;
+  return (
+    <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+  );
 };
