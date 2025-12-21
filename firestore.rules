@@ -82,7 +82,7 @@ service cloud.firestore {
         (inviteId is string) &&
         exists(invitePath(inviteId)) &&
         inviteDoc(inviteId).data.boardId == boardId &&
-        inviteDoc(inviteId).data.email == request.auth.token.email &&
+        inviteDoc(inviteId).data.email.lower() == request.auth.token.email.lower() &&
         inviteDoc(inviteId).data.status == "pending";
     }
 
@@ -152,14 +152,11 @@ service cloud.firestore {
         isValidMemberId(memberId, request.resource.data.boardId, request.resource.data.uid) &&
         request.resource.data.uid == request.auth.uid &&
         request.resource.data.boardId != "default" &&
-        exists(boardPath(request.resource.data.boardId)) &&
         (
           (isBoardCreator(request.resource.data.boardId) &&
             request.resource.data.role == "owner") ||
           (!isBoardCreator(request.resource.data.boardId) &&
-            request.resource.data.role == "member" &&
-            isValidInviteForBoard(request.resource.data.boardId, request.resource.data.inviteId) &&
-            request.resource.data.role == inviteDoc(request.resource.data.inviteId).data.role)
+            isValidInviteForBoard(request.resource.data.boardId, request.resource.data.inviteId))
         );
       allow update: if isSignedIn() &&
         (
@@ -173,8 +170,7 @@ service cloud.firestore {
             (
               (resource.data.uid == boardDoc(resource.data.boardId).data.createdBy &&
                 request.resource.data.role == "owner") ||
-              (resource.data.uid != boardDoc(resource.data.boardId).data.createdBy &&
-                request.resource.data.role == "member")
+              (resource.data.uid != boardDoc(resource.data.boardId).data.createdBy)
             ))
         );
       allow delete: if isSignedIn() && isBoardOwner(resource.data.boardId);
@@ -194,7 +190,7 @@ service cloud.firestore {
 
     match /invites/{inviteId} {
       allow read: if isSignedIn() &&
-        (request.auth.token.email == resource.data.email ||
+        (request.auth.token.email.lower() == resource.data.email.lower() ||
          isBoardOwner(resource.data.boardId));
       allow create: if isBoardOwner(request.resource.data.boardId) &&
         (request.resource.data.boardId is string) &&
@@ -205,7 +201,7 @@ service cloud.firestore {
         request.resource.data.invitedByUid == request.auth.uid &&
         (request.resource.data.createdAt is int || request.resource.data.createdAt is float);
       allow update: if isSignedIn() &&
-        request.auth.token.email == resource.data.email &&
+        request.auth.token.email.lower() == resource.data.email.lower() &&
         resource.data.status == "pending" &&
         request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "respondedAt"]) &&
         (request.resource.data.status == "accepted" || request.resource.data.status == "declined");

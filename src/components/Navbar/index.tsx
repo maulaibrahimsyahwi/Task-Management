@@ -19,6 +19,8 @@ type NavbarProps = {
   notifications: ActivityNotification[];
   onClearNotifications: () => void;
   onRemoveNotification: (id: string) => void;
+  onAcceptInvite: (notificationId: string, inviteId?: string) => void;
+  onDeclineInvite: (notificationId: string, inviteId?: string) => void;
 };
 
 type OpenMenu = "pages" | "settings" | "notifications" | null;
@@ -29,6 +31,8 @@ const Navbar = ({
   notifications,
   onClearNotifications,
   onRemoveNotification,
+  onAcceptInvite,
+  onDeclineInvite,
 }: NavbarProps) => {
   const { activeProjectId } = useProjects();
   const location = useLocation();
@@ -270,6 +274,24 @@ const Navbar = ({
                       <div className="text-xs text-gray-500 mt-0.5">
                         {formatTimeAgo(n.createdAt)}
                       </div>
+                      {n.kind === "invite" && n.inviteId ? (
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onAcceptInvite(n.id, n.inviteId)}
+                            className="px-3 py-1.5 rounded-md bg-orange-400 text-white text-xs font-semibold hover:bg-orange-500"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeclineInvite(n.id, n.inviteId)}
+                            className="px-3 py-1.5 rounded-md bg-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-300"
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                     <button
                       type="button"

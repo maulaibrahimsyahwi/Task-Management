@@ -174,10 +174,19 @@ export const ensureBoardMember = async (
 ) => {
   const memberId = `${boardId}_${user.uid}`;
   const memberRef = doc(db, MEMBERS_COLLECTION, memberId);
-  const snapshot = await getDoc(memberRef);
+  let snapshot = null;
+  try {
+    snapshot = await getDoc(memberRef);
+  } catch (e) {
+    // Permission-denied on a missing doc should not block joining via invite.
+    const code = (e as { code?: unknown })?.code;
+    if (code !== "permission-denied") {
+      throw e;
+    }
+  }
   const storedRole: BoardRole = role === "owner" ? "owner" : normalizeBoardRole(role);
 
-  if (snapshot.exists()) {
+  if (snapshot && snapshot.exists()) {
     const data = snapshot.data() as BoardMember;
     const nextDisplayName = getDisplayName(user);
     if (data.displayName !== nextDisplayName || data.email !== user.email) {
@@ -400,8 +409,44 @@ export const acceptInvite = async (
   });
 };
 
+export const acceptInviteById = async (inviteId: string, user: User) => {
+  const inviteRef = doc(db, INVITES_COLLECTION, inviteId);
+  const snap = await getDoc(inviteRef);
+  if (!snap.exists()) {
+    throw new Error("Invite not found or already handled.");
+  }
+  const invite = snap.data() as Omit<BoardInvite, "id">;
+  if (invite.status !== "pending") {
+    throw new Error("Invite already handled.");
+  }
+  if (invite.email && user.email) {
+    if (invite.email.toLowerCase() !== user.email.toLowerCase()) {
+      throw new Error("Invite email does not match your account.");
+    }
+  }
+  await ensureBoardMember(invite.boardId, user, invite.role, { inviteId });
+  await updateDoc(inviteRef, {
+    status: "accepted",
+    respondedAt: Date.now(),
+  });
+};
+
 export const declineInvite = async (inviteId: string) => {
   const inviteRef = doc(db, INVITES_COLLECTION, inviteId);
+  await updateDoc(inviteRef, {
+    status: "declined",
+    respondedAt: Date.now(),
+  });
+};
+
+export const declineInviteById = async (inviteId: string) => {
+  const inviteRef = doc(db, INVITES_COLLECTION, inviteId);
+  const snap = await getDoc(inviteRef);
+  if (!snap.exists()) {
+    return;
+  }
+  const invite = snap.data() as Omit<BoardInvite, "id">;
+  if (invite.status !== "pending") return;
   await updateDoc(inviteRef, {
     status: "declined",
     respondedAt: Date.now(),

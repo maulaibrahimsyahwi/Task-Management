@@ -8,7 +8,11 @@ import ConfirmDialog, {
   type ConfirmDialogOptions,
 } from "../components/Modals/ConfirmDialog";
 import { useAuth } from "../context/useAuth";
-import { subscribeInvitesForEmail } from "../services/collaborationService";
+import {
+  acceptInviteById,
+  declineInviteById,
+  subscribeInvitesForEmail,
+} from "../services/collaborationService";
 import type { BoardInvite } from "../types/collaboration";
 
 const UI_PREFERENCES_STORAGE_KEY = "rtm_ui_preferences_v1";
@@ -142,11 +146,15 @@ const Layout = () => {
 		setToasts((prev) => [next, ...prev].slice(0, MAX_TOASTS));
 	};
 
-	const pushInboxNotification = (message: string) => {
+	const pushInboxNotification = (
+		message: string,
+		extra?: Partial<ActivityNotification>
+	) => {
 		const next: ActivityNotification = {
 			id: createId(),
 			message,
 			createdAt: Date.now(),
+			...extra,
 		};
 		setNotifications((prev) => [next, ...prev].slice(0, MAX_NOTIFICATIONS));
 		// Also show a toast for immediate feedback
@@ -192,7 +200,14 @@ const Layout = () => {
 					nextSeen.add(invite.id);
 					changed = true;
 					pushInboxNotification(
-						`New project invite from ${invite.invitedByName}. Open Home to respond.`
+						`Undangan baru dari ${invite.invitedByName} sebagai ${invite.role}.`,
+						{
+							kind: "invite",
+							inviteId: invite.id,
+							boardId: invite.boardId,
+							role: invite.role,
+							invitedByName: invite.invitedByName,
+						}
 					);
 				});
 
@@ -200,6 +215,34 @@ const Layout = () => {
 			});
 		});
 	}, [user?.email]);
+
+	const handleAcceptInvite = async (notificationId: string, inviteId?: string) => {
+		if (!inviteId || !user) return;
+		try {
+			await acceptInviteById(inviteId, user);
+			removeNotification(notificationId);
+			addNotification("Invite accepted");
+		} catch (e) {
+			const message =
+				e instanceof Error ? e.message : "Failed to accept invite.";
+			console.error(message, e);
+			addNotification(message);
+		}
+	};
+
+	const handleDeclineInvite = async (notificationId: string, inviteId?: string) => {
+		if (!inviteId) return;
+		try {
+			await declineInviteById(inviteId);
+			removeNotification(notificationId);
+			addNotification("Invite declined");
+		} catch (e) {
+			const message =
+				e instanceof Error ? e.message : "Failed to decline invite.";
+			console.error(message, e);
+			addNotification(message);
+		}
+	};
 
 	const confirm = (options: ConfirmDialogOptions) =>
 		new Promise<boolean>((resolve) => {
@@ -222,6 +265,8 @@ const Layout = () => {
 				notifications={notifications}
 				onClearNotifications={clearNotifications}
 				onRemoveNotification={removeNotification}
+				onAcceptInvite={handleAcceptInvite}
+				onDeclineInvite={handleDeclineInvite}
 			/>
 			<div className="md:pl-[230px] pl-[60px] pr-4 pt-[70px] w-full h-full overflow-y-auto">
 				<Outlet
