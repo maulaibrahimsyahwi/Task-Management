@@ -3,22 +3,23 @@ import {
   Droppable,
   Draggable,
   DropResult,
-  DroppableProvided,
-  DraggableProvided,
 } from "@hello-pangea/dnd";
 import { useMemo, useState, useEffect } from "react";
 import { useOutletContext, useParams } from "react-router";
 import { Link } from "react-router-dom";
-import { Columns, Column, TaskT } from "../../types";
+import type { Columns, Column, TaskT } from "../../types";
 import { onDragEnd } from "../../helpers/onDragEnd";
-import { Plus, X, Trash2, Settings, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import AddModal from "../../components/Modals/AddModal";
-import Task from "../../components/Task";
 import type { LayoutOutletContext } from "../../layout";
 import { useAuth, getUserLabel } from "../../context/useAuth";
 import type { BoardMember } from "../../types/collaboration";
 import { useBoards, getBoardRole } from "../../context/useBoards";
 import { getRoleLabel, isAdminRole } from "../../helpers/roles";
+import BoardHeader from "./BoardHeader";
+import BoardFiltersBar from "./BoardFiltersBar";
+import ColumnCard from "./ColumnCard";
+import AddColumnCard from "./AddColumnCard";
 import {
   subscribeBoardData,
   addTask,
@@ -40,8 +41,14 @@ import { subscribeSprints } from "../../services/sprintService";
 import type { Sprint } from "../../types/sprints";
 import { subscribeAutomationRules } from "../../services/automationService";
 import type { AutomationRule } from "../../types/automation";
+import {
+  DEFAULT_BOARD_FILTERS,
+  type BoardFilters,
+  type ColumnEditState,
+  type SwimlaneMode,
+} from "./boardTypes";
 
-const Home = () => {
+const BoardsPage = () => {
   const { searchQuery, uiPreferences, addNotification } =
     useOutletContext<LayoutOutletContext>();
   const { user, profile } = useAuth();
@@ -57,27 +64,19 @@ const Home = () => {
   const [loading, setLoading] = useState(true);
   const [initializing, setInitializing] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskT | null>(null);
-  const [isAddingColumn, setIsAddingColumn] = useState(false);
-  const [newColumnTitle, setNewColumnTitle] = useState("");
   const [members, setMembers] = useState<BoardMember[]>([]);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [automationRules, setAutomationRules] = useState<AutomationRule[]>([]);
-  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
-  const [columnNameDraft, setColumnNameDraft] = useState("");
-  const [columnWipDraft, setColumnWipDraft] = useState("");
-  const [columnStageDraft, setColumnStageDraft] = useState<
-    "backlog" | "todo" | "in_progress" | "done" | ""
-  >("");
-  const [filters, setFilters] = useState({
-    assignee: "all",
-    priority: "all",
-    tag: "all",
-    due: "all",
-    sprint: "all",
+  const [filters, setFilters] = useState<BoardFilters>({
+    ...DEFAULT_BOARD_FILTERS,
   });
-  const [swimlane, setSwimlane] = useState<"none" | "assignee" | "priority">(
-    "none"
-  );
+  const [swimlane, setSwimlane] = useState<SwimlaneMode>("none");
+  const [columnEdit, setColumnEdit] = useState<ColumnEditState>({
+    columnId: null,
+    name: "",
+    wipLimit: "",
+    stage: "",
+  });
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const isSearching = normalizedSearch.length > 0;
@@ -94,6 +93,18 @@ const Home = () => {
     () => sprints.find((sprint) => sprint.status === "active") || null,
     [sprints]
   );
+
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>();
+    Object.values(columns).forEach((col) => {
+      col.items.forEach((task) => {
+        (task.tags || []).forEach((tag) => {
+          if (tag?.title) tags.add(tag.title);
+        });
+      });
+    });
+    return Array.from(tags).sort();
+  }, [columns]);
 
   const matchesFilters = useMemo(() => {
     const today = new Date();
@@ -243,13 +254,13 @@ const Home = () => {
     );
   }
 
-  const openModal = (columnId: string) => {
+  const openAddTaskModal = (columnId: string) => {
     setSelectedColumn(columnId);
     setSelectedTask(null);
     setModalOpen(true);
   };
 
-  const openEditModal = (task: TaskT) => {
+  const openEditTaskModal = (task: TaskT) => {
     setSelectedTask(task);
     setModalOpen(true);
   };
@@ -260,30 +271,34 @@ const Home = () => {
   };
 
   const startEditColumn = (columnId: string, column: Column) => {
-    setEditingColumnId(columnId);
-    setColumnNameDraft(column.name);
-    setColumnWipDraft(
-      typeof column.wipLimit === "number" && column.wipLimit > 0
-        ? String(column.wipLimit)
-        : ""
-    );
-    setColumnStageDraft(column.stage || "");
+    setColumnEdit({
+      columnId,
+      name: column.name,
+      wipLimit:
+        typeof column.wipLimit === "number" && column.wipLimit > 0
+          ? String(column.wipLimit)
+          : "",
+      stage: column.stage || "",
+    });
   };
 
   const cancelEditColumn = () => {
-    setEditingColumnId(null);
+    setColumnEdit({ columnId: null, name: "", wipLimit: "", stage: "" });
   };
 
   const saveColumnSettings = async () => {
-    if (!editingColumnId) return;
-    const current = columns[editingColumnId];
+    if (!columnEdit.columnId) return;
+    const columnId = columnEdit.columnId;
+    const current = columns[columnId];
     if (!current) return;
-    const nextName = columnNameDraft.trim() || current.name;
-    const parsedWip = columnWipDraft.trim() ? Number(columnWipDraft) : 0;
+    const nextName = columnEdit.name.trim() || current.name;
+    const parsedWip = columnEdit.wipLimit.trim()
+      ? Number(columnEdit.wipLimit)
+      : 0;
     const wipLimit = Number.isNaN(parsedWip) ? 0 : parsedWip;
-    const stage = columnStageDraft || undefined;
+    const stage = columnEdit.stage || undefined;
 
-    await updateColumn(editingColumnId, {
+    await updateColumn(columnId, {
       name: nextName,
       wipLimit,
       stage,
@@ -291,14 +306,14 @@ const Home = () => {
 
     setColumns((prev) => ({
       ...prev,
-      [editingColumnId]: {
-        ...prev[editingColumnId],
+      [columnId]: {
+        ...prev[columnId],
         name: nextName,
         wipLimit: wipLimit > 0 ? wipLimit : undefined,
         stage,
       },
     }));
-    setEditingColumnId(null);
+    setColumnEdit({ columnId: null, name: "", wipLimit: "", stage: "" });
   };
 
   const isWipBlocked = (columnId: string) => {
@@ -307,71 +322,9 @@ const Home = () => {
     return columns[columnId]?.items.length >= limit;
   };
 
-  const getSwimlaneGroups = (tasks: TaskT[]) => {
-    if (swimlane === "none") {
-      return [{ key: "all", label: "All tasks", tasks }];
-    }
-
-    const groups = new Map<
-      string,
-      { key: string; label: string; tasks: TaskT[] }
-    >();
-
-    const pushTask = (key: string, label: string, task: TaskT) => {
-      const existing = groups.get(key);
-      if (existing) {
-        existing.tasks.push(task);
-        return;
-      }
-      groups.set(key, { key, label, tasks: [task] });
-    };
-
-    if (swimlane === "assignee") {
-      const nameById = new Map(
-        members.map((member) => [member.uid, member.displayName])
-      );
-      tasks.forEach((task) => {
-        const key = task.assigneeId || "unassigned";
-        const label =
-          key === "unassigned" ? "Unassigned" : nameById.get(key) || "Member";
-        pushTask(key, label, task);
-      });
-      const orderedKeys = [
-        ...members.map((member) => member.uid).filter((key) => groups.has(key)),
-        ...(groups.has("unassigned") ? ["unassigned"] : []),
-      ];
-      const extraKeys = Array.from(groups.keys()).filter(
-        (key) => !orderedKeys.includes(key)
-      );
-      return [...orderedKeys, ...extraKeys]
-        .map((key) => groups.get(key))
-        .filter(Boolean) as Array<{
-        key: string;
-        label: string;
-        tasks: TaskT[];
-      }>;
-    }
-
-    const order = ["high", "medium", "low", "none"];
-    tasks.forEach((task) => {
-      const key = task.priority || "none";
-      const label =
-        key === "high"
-          ? "High"
-          : key === "medium"
-          ? "Medium"
-          : key === "low"
-          ? "Low"
-          : "None";
-      pushTask(key, label, task);
-    });
-    const orderedKeys = order.filter((key) => groups.has(key));
-    const extraKeys = Array.from(groups.keys()).filter(
-      (key) => !orderedKeys.includes(key)
-    );
-    return [...orderedKeys, ...extraKeys]
-      .map((key) => groups.get(key))
-      .filter(Boolean) as Array<{ key: string; label: string; tasks: TaskT[] }>;
+  const handleClearFilters = () => {
+    setFilters({ ...DEFAULT_BOARD_FILTERS });
+    setSwimlane("none");
   };
 
   const applyAutomation = async (
@@ -569,20 +522,19 @@ const Home = () => {
     }
   };
 
-  const handleAddColumn = async () => {
+  const handleAddColumn = async (title: string): Promise<boolean> => {
     if (!canManageLists) {
       addNotification("Only admins can add lists.");
-      return;
+      return false;
     }
-    if (!newColumnTitle.trim()) return;
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) return false;
     try {
-      const newCol = await addColumn(newColumnTitle, boardId);
-      setColumns({
-        ...columns,
+      const newCol = await addColumn(normalizedTitle, boardId);
+      setColumns((prev) => ({
+        ...prev,
         [newCol.id]: { name: newCol.name, items: [] },
-      });
-      setNewColumnTitle("");
-      setIsAddingColumn(false);
+      }));
       addNotification(`Added list: ${newCol.name}`);
       if (user) {
         void logActivity({
@@ -594,9 +546,11 @@ const Home = () => {
           type: "column:add",
         });
       }
+      return true;
     } catch (error) {
       console.error("Error adding column:", error);
       addNotification("Failed to add list.");
+      return false;
     }
   };
 
@@ -715,19 +669,6 @@ const Home = () => {
     );
   }
 
-  if (!boardId) {
-    return (
-      <div className="w-full flex items-center justify-center py-10">
-        <div className="bg-white rounded-lg p-5 shadow-sm">
-          <div className="text-lg font-bold text-gray-800">No board yet</div>
-          <div className="text-sm text-gray-600 mt-2">
-            Create a board to start managing tasks.
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Jika tidak loading tapi kolom kosong, tampilkan tombol inisialisasi
   if (Object.keys(columns).length === 0) {
     return (
@@ -760,41 +701,12 @@ const Home = () => {
         )}
         {canManageLists && (
           <div className="mt-2 min-w-[300px]">
-            {/* Render add column UI manually here just in case user wants custom start */}
-            {!isAddingColumn ? (
-              <div
-                onClick={() => setIsAddingColumn(true)}
-                className="w-full rounded-lg p-3 flex items-center justify-center gap-2 font-medium bg-gray-100 hover:bg-gray-200 cursor-pointer text-gray-700"
-              >
-                <Plus size={20} />
-                <span>Add a custom list</span>
-              </div>
-            ) : (
-              <div className="w-full bg-white rounded-lg p-3 shadow-sm flex flex-col gap-2 border border-gray-200">
-                <input
-                  autoFocus
-                  type="text"
-                  placeholder="Enter list title..."
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:border-orange-400"
-                  value={newColumnTitle}
-                  onChange={(e) => setNewColumnTitle(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddColumn()}
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleAddColumn}
-                    className="px-3 py-1 bg-orange-400 text-white rounded text-sm hover:bg-orange-500"
-                  >
-                    Add list
-                  </button>
-                  <X
-                    size={20}
-                    className="cursor-pointer text-gray-500 hover:text-gray-700"
-                    onClick={() => setIsAddingColumn(false)}
-                  />
-                </div>
-              </div>
-            )}
+            <AddColumnCard
+              canManage={canManageLists}
+              onAdd={handleAddColumn}
+              variant="empty"
+              addText="Add a custom list"
+            />
           </div>
         )}
       </div>
@@ -804,153 +716,32 @@ const Home = () => {
   return (
     <>
       <div className="w-full flex flex-col gap-4 pb-2">
-        <div className="bg-white rounded-lg p-5 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="text-xl font-bold text-gray-800">
-              {activeBoard?.name || "Board"}
-            </div>
-            <div className="text-sm text-gray-600">
-              {activeBoard?.description || "Manage tasks and collaboration."}
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              {activeSprint
-                ? `Active sprint: ${activeSprint.name}`
-                : "No active sprint"}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex -space-x-2">
-              {members.slice(0, 5).map((member) => (
-                <div
-                  key={member.id}
-                  className="w-8 h-8 rounded-full bg-indigo-600 text-white text-[11px] font-bold grid place-items-center border-2 border-white"
-                  title={member.displayName}
-                >
-                  {member.displayName
-                    .split(" ")
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((p) => p[0])
-                    .join("")
-                    .toUpperCase()}
-                </div>
-              ))}
-            </div>
-            <span className="text-xs font-semibold text-gray-500 capitalize">
-              {getRoleLabel(boardRole)}
-            </span>
-          </div>
-        </div>
+        <BoardHeader
+          title={activeBoard?.name || "Board"}
+          description={
+            activeBoard?.description || "Manage tasks and collaboration."
+          }
+          sprintText={
+            activeSprint
+              ? `Active sprint: ${activeSprint.name}`
+              : "No active sprint"
+          }
+          members={members}
+          roleLabel={getRoleLabel(boardRole)}
+        />
 
-        <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100 flex flex-wrap gap-3 items-center">
-          <select
-            value={filters.assignee}
-            onChange={(e) =>
-              setFilters((prev) => ({ ...prev, assignee: e.target.value }))
-            }
-            className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-          >
-            <option value="all">All assignees</option>
-            {members.map((member) => (
-              <option key={member.uid} value={member.uid}>
-                {member.displayName}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.priority}
-            onChange={(e) =>
-              setFilters((prev) => ({ ...prev, priority: e.target.value }))
-            }
-            className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-          >
-            <option value="all">All priorities</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <select
-            value={filters.tag}
-            onChange={(e) =>
-              setFilters((prev) => ({ ...prev, tag: e.target.value }))
-            }
-            className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-          >
-            <option value="all">All tags</option>
-            {Array.from(
-              new Set(
-                Object.values(columns)
-                  .flatMap((col) => col.items)
-                  .flatMap((task) => (task.tags || []).map((tag) => tag.title))
-              )
-            )
-              .filter(Boolean)
-              .sort()
-              .map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
-                </option>
-              ))}
-          </select>
-          <select
-            value={filters.due}
-            onChange={(e) =>
-              setFilters((prev) => ({ ...prev, due: e.target.value }))
-            }
-            className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-          >
-            <option value="all">All due dates</option>
-            <option value="today">Due today</option>
-            <option value="week">Due this week</option>
-            <option value="overdue">Overdue</option>
-            <option value="none">No due date</option>
-          </select>
-          <select
-            value={filters.sprint}
-            onChange={(e) =>
-              setFilters((prev) => ({ ...prev, sprint: e.target.value }))
-            }
-            className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-          >
-            <option value="all">All sprints</option>
-            <option value="active">Active sprint</option>
-            <option value="backlog">Backlog only</option>
-            {sprints.map((sprint) => (
-              <option key={sprint.id} value={sprint.id}>
-                {sprint.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={swimlane}
-            onChange={(e) =>
-              setSwimlane(e.target.value as "none" | "assignee" | "priority")
-            }
-            className="h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-          >
-            <option value="none">No swimlane</option>
-            <option value="assignee">Swimlane: Assignee</option>
-            <option value="priority">Swimlane: Priority</option>
-          </select>
-          <button
-            type="button"
-            onClick={() =>
-              (() => {
-                setFilters({
-                  assignee: "all",
-                  priority: "all",
-                  tag: "all",
-                  due: "all",
-                  sprint: "all",
-                });
-                setSwimlane("none");
-              })()
-            }
-            className="h-9 px-3 rounded-md bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200"
-          >
-            Clear filters
-          </button>
-        </div>
+        <BoardFiltersBar
+          filters={filters}
+          swimlane={swimlane}
+          tags={availableTags}
+          members={members}
+          sprints={sprints}
+          onChangeFilters={(patch) =>
+            setFilters((prev) => ({ ...prev, ...patch }))
+          }
+          onChangeSwimlane={setSwimlane}
+          onClear={handleClearFilters}
+        />
       </div>
 
       <DragDropContext onDragEnd={handleDragEnd}>
@@ -960,249 +751,54 @@ const Home = () => {
           type="COLUMN"
           isDropDisabled={isFiltering}
         >
-          {(provided: DroppableProvided) => (
+          {(provided) => (
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
               className="w-full h-full flex items-start px-5 pb-8 gap-6 overflow-x-auto"
             >
-              {Object.entries(columns).map(
-                ([columnId, column]: [string, Column], index: number) => (
-                  <Draggable
-                    draggableId={columnId}
-                    index={index}
-                    key={columnId}
-                    isDragDisabled={isFiltering}
-                  >
-                    {(provided: DraggableProvided) => (
-                      <div
-                        ref={provided.innerRef}
-                        {...provided.draggableProps}
-                        className="flex flex-col gap-0 min-w-[290px]"
-                      >
-                        <Droppable
-                          droppableId={columnId}
-                          key={columnId}
-                          isDropDisabled={isFiltering}
-                        >
-                          {(droppableProvided: DroppableProvided) => (
-                            <div
-                              ref={droppableProvided.innerRef}
-                              {...droppableProvided.droppableProps}
-                              className="flex flex-col w-full gap-3 items-center py-5"
-                            >
-                              <div
-                                {...provided.dragHandleProps}
-                                className={`flex items-center justify-between py-[10px] w-full bg-white rounded-lg shadow-sm text-[#555] font-medium text-[15px] px-3 ${
-                                  column.wipLimit &&
-                                  column.items.length >= column.wipLimit
-                                    ? "border border-red-200"
-                                    : ""
-                                }`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  {column.name}
-                                  <span className="bg-gray-200 text-xs px-2 py-1 rounded-full text-gray-600">
-                                    {isFiltering
-                                      ? `${
-                                          column.items.filter(matchesFilters)
-                                            .length
-                                        } / ${column.items.length}`
-                                      : column.wipLimit
-                                      ? `${column.items.length} / ${column.wipLimit}`
-                                      : column.items.length}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {canManageLists ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        startEditColumn(columnId, column)
-                                      }
-                                      className="text-gray-400 hover:text-gray-700"
-                                      title="Column settings"
-                                    >
-                                      <Settings size={16} />
-                                    </button>
-                                  ) : null}
-                                  <Trash2
-                                    size={18}
-                                    className="text-gray-400 hover:text-red-500 cursor-pointer"
-                                    onClick={() => handleDeleteColumn(columnId)}
-                                  />
-                                </div>
-                              </div>
-
-                              {editingColumnId === columnId ? (
-                                <div className="w-full bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-                                  <div className="flex flex-col gap-2">
-                                    <input
-                                      type="text"
-                                      value={columnNameDraft}
-                                      onChange={(e) =>
-                                        setColumnNameDraft(e.target.value)
-                                      }
-                                      className="w-full h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-                                      placeholder="List name"
-                                    />
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        value={columnWipDraft}
-                                        onChange={(e) =>
-                                          setColumnWipDraft(e.target.value)
-                                        }
-                                        className="w-full h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-                                        placeholder="WIP limit"
-                                      />
-                                      <select
-                                        value={columnStageDraft}
-                                        onChange={(e) =>
-                                          setColumnStageDraft(
-                                            e.target.value as
-                                              | "backlog"
-                                              | "todo"
-                                              | "in_progress"
-                                              | "done"
-                                              | ""
-                                          )
-                                        }
-                                        className="w-full h-9 px-2 rounded-md bg-slate-100 border border-slate-300 text-sm"
-                                      >
-                                        <option value="">Stage (auto)</option>
-                                        <option value="backlog">Backlog</option>
-                                        <option value="todo">To do</option>
-                                        <option value="in_progress">
-                                          In progress
-                                        </option>
-                                        <option value="done">Done</option>
-                                      </select>
-                                    </div>
-                                    <div className="flex items-center gap-2 justify-end">
-                                      <button
-                                        type="button"
-                                        onClick={cancelEditColumn}
-                                        className="px-3 py-1.5 rounded-md bg-gray-100 text-gray-700 text-xs font-semibold hover:bg-gray-200"
-                                      >
-                                        Cancel
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={saveColumnSettings}
-                                        className="px-3 py-1.5 rounded-md bg-orange-400 text-white text-xs font-semibold hover:bg-orange-500"
-                                      >
-                                        Save
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : null}
-
-                              {(() => {
-                                const visibleTasks =
-                                  column.items.filter(matchesFilters);
-                                const groups = getSwimlaneGroups(visibleTasks);
-                                let taskIndex = 0;
-                                return groups.map((group) => (
-                                  <div
-                                    key={group.key}
-                                    className="w-full flex flex-col gap-2"
-                                  >
-                                    {swimlane !== "none" ? (
-                                      <div className="w-full text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
-                                        {group.label}
-                                      </div>
-                                    ) : null}
-                                    {group.tasks.map((task: TaskT) => {
-                                      const index = taskIndex;
-                                      taskIndex += 1;
-                                      return (
-                                        <Draggable
-                                          key={task.id.toString()}
-                                          draggableId={task.id.toString()}
-                                          index={index}
-                                          isDragDisabled={isFiltering}
-                                        >
-                                          {(provided: DraggableProvided) => (
-                                            <Task
-                                              provided={provided}
-                                              task={task}
-                                              onClick={openEditModal}
-                                              assignee={members.find(
-                                                (m) => m.uid === task.assigneeId
-                                              )}
-                                              uiPreferences={uiPreferences}
-                                            />
-                                          )}
-                                        </Draggable>
-                                      );
-                                    })}
-                                  </div>
-                                ));
-                              })()}
-                              {droppableProvided.placeholder}
-                            </div>
-                          )}
-                        </Droppable>
-                        <div
-                          onClick={() => openModal(columnId)}
-                          className="flex cursor-pointer items-center justify-center gap-1 py-[10px] w-full opacity-90 bg-white rounded-lg shadow-sm text-[#555] font-medium text-[15px] hover:bg-gray-50 transition-colors"
-                        >
-                          <Plus color={"#555"} size={20} />
-                          Add Task
-                        </div>
-                      </div>
-                    )}
-                  </Draggable>
-                )
-              )}
+              {Object.entries(columns).map(([columnId, column], index) => (
+                <Draggable
+                  draggableId={columnId}
+                  index={index}
+                  key={columnId}
+                  isDragDisabled={isFiltering}
+                >
+                  {(columnProvided) => (
+                    <ColumnCard
+                      columnId={columnId}
+                      column={column}
+                      provided={columnProvided}
+                      isFiltering={isFiltering}
+                      canManageLists={canManageLists}
+                      members={members}
+                      uiPreferences={uiPreferences}
+                      swimlane={swimlane}
+                      matchesFilters={matchesFilters}
+                      columnEdit={columnEdit}
+                      onStartEdit={startEditColumn}
+                      onChangeEdit={(patch) =>
+                        setColumnEdit((prev) => ({ ...prev, ...patch }))
+                      }
+                      onCancelEdit={cancelEditColumn}
+                      onSaveEdit={saveColumnSettings}
+                      onOpenAddTask={openAddTaskModal}
+                      onOpenTask={openEditTaskModal}
+                      onDeleteColumn={handleDeleteColumn}
+                    />
+                  )}
+                </Draggable>
+              ))}
               {provided.placeholder}
 
               <div className="min-w-[290px] py-5">
-                {!isAddingColumn ? (
-                  <div
-                    onClick={() => {
-                      if (canManageLists) setIsAddingColumn(true);
-                    }}
-                    className={`w-full rounded-lg p-3 flex items-center gap-2 font-medium transition-all ${
-                      canManageLists
-                        ? "bg-white/50 hover:bg-white/80 cursor-pointer text-gray-700"
-                        : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    }`}
-                  >
-                    <Plus size={20} />
-                    <span>
-                      {canManageLists ? "Add another list" : "Admin only"}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="w-full bg-white rounded-lg p-3 shadow-sm flex flex-col gap-2">
-                    <input
-                      autoFocus
-                      type="text"
-                      placeholder="Enter list title..."
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:border-orange-400"
-                      value={newColumnTitle}
-                      onChange={(e) => setNewColumnTitle(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleAddColumn()}
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleAddColumn}
-                        className="px-3 py-1 bg-orange-400 text-white rounded text-sm hover:bg-orange-500"
-                      >
-                        Add list
-                      </button>
-                      <X
-                        size={20}
-                        className="cursor-pointer text-gray-500 hover:text-gray-700"
-                        onClick={() => setIsAddingColumn(false)}
-                      />
-                    </div>
-                  </div>
-                )}
+                <AddColumnCard
+                  canManage={canManageLists}
+                  onAdd={handleAddColumn}
+                  variant="board"
+                  addText="Add another list"
+                  disabledText="Admin only"
+                />
               </div>
             </div>
           )}
@@ -1223,4 +819,4 @@ const Home = () => {
   );
 };
 
-export default Home;
+export default BoardsPage;
