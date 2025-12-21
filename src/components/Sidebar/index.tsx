@@ -3,14 +3,11 @@ import {
   Grid,
   Home,
   LogOut,
-  Newspaper,
-  Bell,
-  Users,
   PieChart,
-  ClipboardList,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
+import taskFlowLogo from "../../assets/images/Task Flow.png";
 
 const Sidebar = () => {
   const { signOut } = useAuth();
@@ -26,11 +23,6 @@ const Sidebar = () => {
       to: "/boards",
     },
     {
-      title: "Backlog",
-      icon: <ClipboardList color="#555" size={22} />,
-      to: "/backlog",
-    },
-    {
       title: "Projects",
       icon: <Grid color="#555" size={22} />,
       to: "/projects",
@@ -40,31 +32,15 @@ const Sidebar = () => {
       icon: <PieChart color="#555" size={22} />,
       to: "/analytics",
     },
-    {
-      title: "Workflows",
-      icon: <Users color="#555" size={22} />,
-      to: "/workflows",
-    },
-    {
-      title: "Notifications",
-      icon: <Bell color="#555" size={22} />,
-      to: "/notifications",
-    },
-    {
-      title: "Newsletter",
-      icon: <Newspaper color="#555" size={22} />,
-      to: "/newsletter",
-    },
   ];
   return (
     <div className="fixed left-0 top-0 md:w-[230px] w-[60px] overflow-hidden h-full flex flex-col">
       <div className="w-full flex items-center md:justify-start justify-center md:pl-5 h-[70px] bg-[#fff]">
-        <span className="text-orange-400 font-semibold text-2xl md:block hidden">
-          Logo.
-        </span>
-        <span className="text-orange-400 font-semibold text-2xl md:hidden block">
-          L.
-        </span>
+        <img
+          src={taskFlowLogo}
+          alt="Task Flow"
+          className="md:w-[150px] w-[42px] md:h-[42px] h-[42px] object-contain"
+        />
       </div>
       <div className="w-full h-[calc(100vh-70px)] border-r flex flex-col md:items-start items-center gap-2 border-slate-300 bg-[#fff] py-5 md:px-3 px-3 relative">
         {navLinks.map((link) => {

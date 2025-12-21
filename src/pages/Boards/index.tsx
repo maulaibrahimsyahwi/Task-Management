@@ -8,6 +8,7 @@ import {
 } from "@hello-pangea/dnd";
 import { useMemo, useState, useEffect } from "react";
 import { useOutletContext, useParams } from "react-router";
+import { Link } from "react-router-dom";
 import { Columns, Column, TaskT } from "../../types";
 import { onDragEnd } from "../../helpers/onDragEnd";
 import { Plus, X, Trash2, Settings } from "lucide-react";
@@ -200,6 +201,25 @@ const Home = () => {
     }
     return subscribeAutomationRules(boardId, setAutomationRules);
   }, [boardId]);
+
+  if (!boardId) {
+    return (
+      <div className="w-full bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+        <div className="text-lg font-bold text-gray-800">No board selected</div>
+        <div className="text-sm text-gray-600 mt-1">
+          Open a project to start managing tasks.
+        </div>
+        <div className="mt-4">
+          <Link
+            to="/projects"
+            className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-orange-400 text-white font-medium hover:bg-orange-500"
+          >
+            Go to Projects
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const openModal = (columnId: string) => {
     setSelectedColumn(columnId);

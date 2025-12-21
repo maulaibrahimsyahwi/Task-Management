@@ -1,62 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
-import { getBoardData } from "../../services/taskService";
-import { Columns, TaskT } from "../../types";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useBoards } from "../../context/useBoards";
+import { useProjects } from "../../context/useProjects";
 
-type TagGroup = {
-  title: string;
-  count: number;
-  tasks: TaskT[];
+const describeProjectError = (e: unknown) => {
+  if (e && typeof e === "object") {
+    const code = "code" in e ? String((e as { code?: unknown }).code) : "";
+    const message =
+      "message" in e ? String((e as { message?: unknown }).message) : "";
+    if (code === "permission-denied") {
+      return "Permission denied. Make sure `firestore.rules` has been deployed to your Firebase project.";
+    }
+    return message || "Failed to create project.";
+  }
+  return "Failed to create project.";
 };
 
 const Projects = () => {
-  const { activeBoardId } = useBoards();
-  const [columns, setColumns] = useState<Columns>({});
-  const [loading, setLoading] = useState(true);
-  const [selectedTag, setSelectedTag] = useState<string>("all");
+  const { projects, activeProjectId, setActiveProjectId, createProject, loading } =
+    useProjects();
+  const { setActiveBoardId } = useBoards();
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const run = async () => {
-      try {
-        if (!activeBoardId) {
-          setColumns({});
-          return;
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const created = await createProject({ name, description });
+        setName("");
+        setDescription("");
+        if (created) {
+          setActiveBoardId(created.boardId);
+          navigate(`/projects/board/${created.projectId}`);
         }
-        const data = await getBoardData(activeBoardId);
-        setColumns(data);
+      } catch (e) {
+        setError(describeProjectError(e));
       } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [activeBoardId]);
-
-  const groups = useMemo<TagGroup[]>(() => {
-    const allTasks = Object.values(columns).flatMap((c) => c.items);
-    const byTag = new Map<string, TaskT[]>();
-    allTasks.forEach((task) => {
-      (task.tags || []).forEach((tag) => {
-        const key = tag.title.trim();
-        if (!key) return;
-        const current = byTag.get(key) || [];
-        byTag.set(key, [...current, task]);
-      });
-    });
-
-    const entries: TagGroup[] = Array.from(byTag.entries()).map(
-      ([title, tasks]) => ({ title, tasks, count: tasks.length })
-    );
-    entries.sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
-    return entries;
-  }, [columns]);
-
-  const visibleTasks = useMemo(() => {
-    if (selectedTag === "all") {
-      return Object.values(columns).flatMap((c) => c.items);
+      setCreating(false);
     }
-    const group = groups.find((g) => g.title === selectedTag);
-    return group?.tasks || [];
-  }, [columns, groups, selectedTag]);
+  };
 
   if (loading) {
     return (
@@ -70,94 +57,94 @@ const Projects = () => {
 
   return (
     <div className="w-full flex flex-col gap-6 pb-8">
-      <div className="bg-white rounded-lg p-5 shadow-sm">
-        <div className="text-lg font-bold text-gray-800">Projects</div>
+      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+        <div className="text-xl font-bold text-gray-800">Projects</div>
         <div className="text-sm text-gray-600">
-          Grouped by task tags (each tag = a project).
+          Each project has a task board with default columns.
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+
+        <div className="mt-5 grid md:grid-cols-3 grid-cols-1 gap-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Project name"
+            className="h-11 px-3 rounded-md bg-slate-100 border border-slate-300 outline-none text-sm"
+          />
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Description (optional)"
+            className="h-11 px-3 rounded-md bg-slate-100 border border-slate-300 outline-none text-sm"
+          />
           <button
-            onClick={() => setSelectedTag("all")}
-            className={`px-3 py-1 rounded-full text-sm font-semibold border ${
-              selectedTag === "all"
-                ? "bg-orange-400 text-white border-orange-400"
-                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-            }`}
+            type="button"
+            onClick={handleCreate}
+            disabled={creating || !name.trim()}
+            className="h-11 rounded-md bg-orange-400 text-white font-semibold hover:bg-orange-500 disabled:opacity-60"
           >
-            All
+            {creating ? "Creating..." : "Create project"}
           </button>
-          {groups.map((g) => (
-            <button
-              key={g.title}
-              onClick={() => setSelectedTag(g.title)}
-              className={`px-3 py-1 rounded-full text-sm font-semibold border ${
-                selectedTag === g.title
-                  ? "bg-orange-400 text-white border-orange-400"
-                  : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-              }`}
-              title={`${g.count} tasks`}
-            >
-              {g.title} ({g.count})
-            </button>
-          ))}
         </div>
       </div>
 
-      <div className="bg-white rounded-lg p-5 shadow-sm">
-        <div className="text-sm text-gray-600">
-          Showing <span className="font-semibold">{visibleTasks.length}</span>{" "}
-          tasks
-          {selectedTag !== "all" ? (
-            <>
-              {" "}
-              tagged <span className="font-semibold">{selectedTag}</span>
-            </>
-          ) : null}
-          .
+      {error ? (
+        <div className="text-sm text-gray-700 bg-white rounded-lg border border-gray-100 px-4 py-3 shadow-sm">
+          <span className="text-red-600 font-semibold">Error:</span> {error}
         </div>
-        {visibleTasks.length === 0 ? (
-          <div className="mt-4 text-sm text-gray-600">No tasks found.</div>
-        ) : (
-          <div className="mt-4 grid md:grid-cols-2 grid-cols-1 gap-3">
-            {visibleTasks.map((task) => (
-              <div
-                key={task.id}
-                className="bg-gray-50 border border-gray-200 rounded-lg p-3"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-bold text-gray-800">
-                    {task.title}
+      ) : null}
+
+      <div className="grid md:grid-cols-2 grid-cols-1 gap-4">
+        {projects.map((project) => {
+          const isActive = activeProjectId === project.id;
+          return (
+            <div
+              key={project.id}
+              className={`bg-white rounded-lg p-5 shadow-sm border ${
+                isActive ? "border-orange-300" : "border-gray-100"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-bold text-gray-800">
+                    {project.name}
                   </div>
-                  <div
-                    className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                      task.priority === "high"
-                        ? "bg-red-100 text-red-700"
-                        : task.priority === "medium"
-                        ? "bg-orange-100 text-orange-700"
-                        : "bg-blue-100 text-blue-700"
-                    }`}
-                  >
-                    {task.priority || "none"}
+                  <div className="text-sm text-gray-600 mt-1">
+                    {project.description || "No description yet."}
                   </div>
                 </div>
-                <div className="mt-1 text-xs text-gray-600">
-                  {task.description}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {task.tags?.map((tag) => (
-                    <span
-                      key={tag.title}
-                      className="px-2 py-0.5 text-[12px] font-semibold rounded-md"
-                      style={{ backgroundColor: tag.bg, color: tag.text }}
-                    >
-                      {tag.title}
-                    </span>
-                  ))}
-                </div>
+                {isActive ? (
+                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-orange-100 text-orange-700">
+                    Active
+                  </span>
+                ) : null}
               </div>
-            ))}
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveProjectId(project.id)}
+                  className="px-3 py-1.5 rounded-md bg-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-300"
+                >
+                  Select
+                </button>
+                <Link
+                  to={`/projects/board/${project.id}`}
+                  onClick={() => setActiveProjectId(project.id)}
+                  className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800"
+                >
+                  Open
+                </Link>
+              </div>
+            </div>
+          );
+        })}
+        {projects.length === 0 ? (
+          <div className="bg-white rounded-lg p-5 shadow-sm border border-gray-100">
+            <div className="text-sm text-gray-600">
+              No projects yet. Create one to get started.
+            </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

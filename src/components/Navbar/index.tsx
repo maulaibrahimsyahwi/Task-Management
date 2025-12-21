@@ -29,12 +29,8 @@ type OpenMenu = "pages" | "settings" | "notifications" | "boards" | null;
 const NAV_ITEMS = [
   { title: "Home", to: "/home" },
   { title: "Boards", to: "/boards" },
-  { title: "Backlog", to: "/backlog" },
   { title: "Projects", to: "/projects" },
   { title: "Analytics", to: "/analytics" },
-  { title: "Workflows", to: "/workflows" },
-  { title: "Notifications", to: "/notifications" },
-  { title: "Newsletter", to: "/newsletter" },
 ];
 
 const Navbar = ({
@@ -56,12 +52,8 @@ const Navbar = ({
     const item = NAV_ITEMS.find((i) => i.to === location.pathname);
     if (item) return item.title;
     if (location.pathname.startsWith("/boards")) return "Boards";
-    if (location.pathname.startsWith("/backlog")) return "Backlog";
     if (location.pathname.startsWith("/projects")) return "Projects";
     if (location.pathname.startsWith("/analytics")) return "Analytics";
-    if (location.pathname.startsWith("/workflows")) return "Workflows";
-    if (location.pathname.startsWith("/notifications")) return "Notifications";
-    if (location.pathname.startsWith("/newsletter")) return "Newsletter";
     if (location.pathname.startsWith("/home")) return "Home";
     return "Board";
   }, [location.pathname]);
@@ -197,7 +189,7 @@ const Navbar = ({
               ))}
             </div>
             <Link
-              to="/boards"
+              to="/boards/manage"
               onClick={() => setOpenMenu(null)}
               className="block px-3 py-2 text-sm font-semibold text-orange-500 hover:text-orange-600 border-t border-gray-100"
             >

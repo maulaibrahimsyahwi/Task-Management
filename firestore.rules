@@ -5,6 +5,18 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function boardDoc(boardId) {
+      return get(/databases/$(database)/documents/boards/$(boardId));
+    }
+
+    function projectDoc(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId));
+    }
+
+    function inviteDoc(inviteId) {
+      return get(/databases/$(database)/documents/invites/$(inviteId));
+    }
+
     function memberDoc(boardId) {
       return get(/databases/$(database)/documents/boardMembers/$(boardId + "_" + request.auth.uid));
     }
@@ -13,10 +25,49 @@ service cloud.firestore {
       return isSignedIn() && memberDoc(boardId).exists();
     }
 
+    function isBoardCreator(boardId) {
+      let board = boardDoc(boardId);
+      return isSignedIn() &&
+        board.exists() &&
+        board.data.createdBy == request.auth.uid;
+    }
+
+    function isProjectOwner(projectId) {
+      let project = projectDoc(projectId);
+      return isSignedIn() &&
+        project.exists() &&
+        project.data.createdBy == request.auth.uid;
+    }
+
+    function isBoardOwner(boardId) {
+      return isBoardCreator(boardId);
+    }
+
     function isBoardAdmin(boardId) {
       return isBoardMember(boardId) &&
         (memberDoc(boardId).data.role == "owner" ||
          memberDoc(boardId).data.role == "admin");
+    }
+
+    function isBoardMemberOrOwner(boardId) {
+      return isBoardMember(boardId) || isBoardOwner(boardId);
+    }
+
+    function isBoardAdminOrOwner(boardId) {
+      return isBoardAdmin(boardId) || isBoardOwner(boardId);
+    }
+
+    function isValidMemberId(memberId, boardId, uid) {
+      return memberId == boardId + "_" + uid;
+    }
+
+    function isValidInviteForBoard(boardId, inviteId) {
+      return isSignedIn() &&
+        (inviteId is string) &&
+        inviteDoc(inviteId).exists() &&
+        inviteDoc(inviteId).data.boardId == boardId &&
+        inviteDoc(inviteId).data.email == request.auth.token.email &&
+        inviteDoc(inviteId).data.status == "pending";
     }
 
     function isSelfMemberUpdate() {
@@ -30,71 +81,132 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    match /boards/{boardId} {
-      allow read: if isBoardMember(boardId) ||
-        (boardId == "default" && isSignedIn()) ||
-        (resource.data.createdBy == request.auth.uid);
+    match /projects/{projectId} {
+      allow read: if isSignedIn() && resource.data.createdBy == request.auth.uid;
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
-      allow update, delete: if isBoardAdmin(boardId);
+      allow update: if isSignedIn() &&
+        resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdBy == resource.data.createdBy &&
+        request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /boards/{boardId} {
+      allow read: if isSignedIn() &&
+        (boardId == "default" ||
+         isBoardMember(boardId) ||
+         resource.data.createdBy == request.auth.uid);
+      allow create: if isSignedIn() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        (request.resource.data.projectId is string) &&
+        request.resource.data.projectId.size() > 0 &&
+        isProjectOwner(request.resource.data.projectId);
+      allow update: if isSignedIn() &&
+        resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdBy == resource.data.createdBy &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.projectId == resource.data.projectId;
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
 
     match /sprints/{sprintId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardAdmin(request.resource.data.boardId);
-      allow update, delete: if isBoardAdmin(resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardAdminOrOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardAdminOrOwner(resource.data.boardId);
     }
 
     match /boardMembers/{memberId} {
       allow read: if isSignedIn() &&
-        (resource.data.uid == request.auth.uid || isBoardMember(resource.data.boardId));
+        (resource.data.uid == request.auth.uid ||
+         isBoardMember(resource.data.boardId) ||
+         isBoardOwner(resource.data.boardId));
       allow create: if isSignedIn() &&
-        (request.resource.data.uid == request.auth.uid ||
-         isBoardAdmin(request.resource.data.boardId));
+        (request.resource.data.boardId is string) &&
+        (request.resource.data.uid is string) &&
+        isValidMemberId(memberId, request.resource.data.boardId, request.resource.data.uid) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.boardId != "default" &&
+        boardDoc(request.resource.data.boardId).exists() &&
+        (
+          (isBoardCreator(request.resource.data.boardId) &&
+            request.resource.data.role == "owner") ||
+          (!isBoardCreator(request.resource.data.boardId) &&
+            request.resource.data.role in ["admin", "member"] &&
+            isValidInviteForBoard(request.resource.data.boardId, request.resource.data.inviteId) &&
+            request.resource.data.role == inviteDoc(request.resource.data.inviteId).data.role)
+        );
       allow update: if isSignedIn() &&
-        (isBoardAdmin(resource.data.boardId) || isSelfMemberUpdate());
-      allow delete: if isSignedIn() && isBoardAdmin(resource.data.boardId);
+        (
+          (isSelfMemberUpdate() &&
+            request.resource.data.diff(resource.data).changedKeys().hasOnly(["displayName", "email"])) ||
+          (isBoardOwner(resource.data.boardId) &&
+            isValidMemberId(memberId, resource.data.boardId, resource.data.uid) &&
+            request.resource.data.uid == resource.data.uid &&
+            request.resource.data.boardId == resource.data.boardId &&
+            request.resource.data.diff(resource.data).changedKeys().hasOnly(["role", "displayName", "email"]) &&
+            (
+              (resource.data.uid == boardDoc(resource.data.boardId).data.createdBy &&
+                request.resource.data.role == "owner") ||
+              (resource.data.uid != boardDoc(resource.data.boardId).data.createdBy &&
+                request.resource.data.role in ["admin", "member"])
+            ))
+        );
+      allow delete: if isSignedIn() && isBoardOwner(resource.data.boardId);
     }
 
     match /columns/{columnId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardAdmin(request.resource.data.boardId);
-      allow update, delete: if isBoardAdmin(resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardAdminOrOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardAdminOrOwner(resource.data.boardId);
     }
 
     match /tasks/{taskId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardMember(request.resource.data.boardId);
-      allow update, delete: if isBoardMember(resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardMemberOrOwner(resource.data.boardId);
     }
 
     match /invites/{inviteId} {
-      allow read: if isSignedIn() && request.auth.token.email == resource.data.email;
-      allow create: if isBoardAdmin(request.resource.data.boardId);
-      allow update: if isSignedIn() && request.auth.token.email == resource.data.email;
-      allow delete: if isBoardAdmin(resource.data.boardId);
+      allow read: if isSignedIn() &&
+        (request.auth.token.email == resource.data.email ||
+         isBoardOwner(resource.data.boardId));
+      allow create: if isBoardOwner(request.resource.data.boardId) &&
+        (request.resource.data.boardId is string) &&
+        (request.resource.data.email is string) &&
+        request.resource.data.email.size() > 0 &&
+        (request.resource.data.role in ["admin", "member"]) &&
+        request.resource.data.status == "pending" &&
+        request.resource.data.invitedByUid == request.auth.uid &&
+        (request.resource.data.createdAt is int || request.resource.data.createdAt is float);
+      allow update: if isSignedIn() &&
+        request.auth.token.email == resource.data.email &&
+        resource.data.status == "pending" &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "respondedAt"]) &&
+        (request.resource.data.status == "accepted" || request.resource.data.status == "declined");
+      allow delete: if isBoardOwner(resource.data.boardId);
     }
 
     match /activity/{activityId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardMember(request.resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
       allow update, delete: if false;
     }
 
     match /automations/{ruleId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardAdmin(request.resource.data.boardId);
-      allow update, delete: if isBoardAdmin(resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardAdminOrOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardAdminOrOwner(resource.data.boardId);
     }
 
     match /taskComments/{commentId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardMember(request.resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
       allow update, delete: if false;
     }
 
     match /timeLogs/{logId} {
-      allow read: if isBoardMember(resource.data.boardId);
-      allow create: if isBoardMember(request.resource.data.boardId);
+      allow read: if isBoardMemberOrOwner(resource.data.boardId);
+      allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
       allow update, delete: if false;
     }
   }

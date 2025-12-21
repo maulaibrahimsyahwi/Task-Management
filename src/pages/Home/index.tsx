@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth, getUserLabel } from "../../context/useAuth";
-import { useBoards, getBoardRole } from "../../context/useBoards";
+import { useBoards } from "../../context/useBoards";
 import {
   getRoleLabel,
-  isAdminRole,
   normalizeBoardRole,
   type NormalizedBoardRole,
 } from "../../helpers/roles";
@@ -52,9 +51,9 @@ type TaskRow = TaskT & {
   columnName: string;
 };
 
-const Home = () => {
+  const Home = () => {
   const { user, profile } = useAuth();
-  const { activeBoardId, activeBoard, boards, memberships } = useBoards();
+  const { activeBoardId, activeBoard, boards } = useBoards();
   const boardLink = activeBoardId ? `/boards/${activeBoardId}` : "/boards";
   const [columns, setColumns] = useState<Columns>({});
   const [members, setMembers] = useState<BoardMember[]>([]);
@@ -68,10 +67,8 @@ const Home = () => {
   const [inviteSending, setInviteSending] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
   const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
-  const boardRole = activeBoardId
-    ? getBoardRole(activeBoardId, memberships)
-    : "member";
-  const canManageMembers = isAdminRole(boardRole);
+  const isOwner = !!user && !!activeBoard && activeBoard.createdBy === user.uid;
+  const canManageMembers = isOwner;
   const visibleMembers = canManageMembers ? members : members.slice(0, 6);
 
   useEffect(() => {
@@ -328,7 +325,7 @@ const Home = () => {
             </div>
             {activeBoardId && !canManageMembers ? (
               <span className="text-xs text-gray-500">
-                Only admins can invite members.
+                Only the owner can invite members.
               </span>
             ) : null}
           </div>

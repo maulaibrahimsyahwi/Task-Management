@@ -9,4 +9,4 @@ export const isAdminRole = (role: BoardRole) =>
   normalizeBoardRole(role) === "admin";
 
 export const getRoleLabel = (role: BoardRole) =>
-  normalizeBoardRole(role) === "admin" ? "Admin" : "Member";
+  role === "owner" ? "Owner" : role === "admin" ? "Admin" : "Member";

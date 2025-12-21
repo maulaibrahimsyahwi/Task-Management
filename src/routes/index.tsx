@@ -5,12 +5,9 @@ import Auth from "../pages/Auth";
 import Home from "../pages/Home";
 import Boards from "../pages/Boards";
 import BoardsHub from "../pages/BoardsHub";
-import Backlog from "../pages/Backlog";
 import Projects from "../pages/Projects";
+import ProjectBoard from "../pages/ProjectBoard";
 import Analytics from "../pages/Analytics";
-import Workflows from "../pages/Workflows";
-import Notifications from "../pages/Notifications";
-import Newsletter from "../pages/Newsletter";
 import NotFound from "../pages/NotFound";
 
 const routes: RouteObject[] = [
@@ -28,7 +25,7 @@ const routes: RouteObject[] = [
     children: [
       {
         index: true,
-        element: <Navigate to="/boards" replace />,
+        element: <Navigate to="/projects" replace />,
       },
       {
         path: "home",
@@ -36,6 +33,10 @@ const routes: RouteObject[] = [
       },
       {
         path: "boards",
+        element: <Boards />,
+      },
+      {
+        path: "boards/manage",
         element: <BoardsHub />,
       },
       {
@@ -43,28 +44,20 @@ const routes: RouteObject[] = [
         element: <Boards />,
       },
       {
-        path: "backlog",
-        element: <Backlog />,
-      },
-      {
         path: "projects",
         element: <Projects />,
       },
       {
+        path: "projects/boards/:projectId",
+        element: <ProjectBoard />,
+      },
+      {
+        path: "projects/:projectId",
+        element: <ProjectBoard />,
+      },
+      {
         path: "analytics",
         element: <Analytics />,
-      },
-      {
-        path: "workflows",
-        element: <Workflows />,
-      },
-      {
-        path: "notifications",
-        element: <Notifications />,
-      },
-      {
-        path: "newsletter",
-        element: <Newsletter />,
       },
       {
         path: "*",

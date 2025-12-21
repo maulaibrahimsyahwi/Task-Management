@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { createBoard } from "./boardService";
+import { createProject, setProjectDefaultBoard } from "./projectService";
 import { isAdminRole, normalizeBoardRole } from "../helpers/roles";
 import type {
   ActivityEntry,
@@ -94,6 +95,27 @@ export const ensurePersonalBoard = async (user: User) => {
   const userRef = doc(db, USERS_COLLECTION, user.uid);
   const userSnap = await getDoc(userRef);
   const data = userSnap.exists() ? (userSnap.data() as Partial<UserProfile>) : {};
+
+  let projectId =
+    typeof data.defaultProjectId === "string" ? data.defaultProjectId : "";
+  if (projectId) {
+    const projectRef = doc(db, "projects", projectId);
+    const projectSnap = await getDoc(projectRef);
+    if (!projectSnap.exists() || projectSnap.data()?.createdBy !== user.uid) {
+      projectId = "";
+    }
+  }
+
+  if (!projectId) {
+    const project = await createProject({
+      name: "My Project",
+      description: "Your personal workspace",
+      createdBy: user.uid,
+    });
+    projectId = project.id;
+    await setDoc(userRef, { defaultProjectId: projectId }, { merge: true });
+  }
+
   let boardId =
     typeof data.defaultBoardId === "string" ? data.defaultBoardId : "";
 
@@ -135,8 +157,10 @@ export const ensurePersonalBoard = async (user: User) => {
     name: "My Board",
     description: "Your personal workspace",
     createdBy: user.uid,
+    projectId,
   });
-  await ensureBoardMember(board.id, user, "admin");
+  await setProjectDefaultBoard(projectId, board.id);
+  await ensureBoardMember(board.id, user, "owner");
   await setDoc(userRef, { defaultBoardId: board.id }, { merge: true });
   return { boardId: board.id, created: true };
 };
@@ -144,12 +168,13 @@ export const ensurePersonalBoard = async (user: User) => {
 export const ensureBoardMember = async (
   boardId: string,
   user: User,
-  role: BoardRole
+  role: BoardRole,
+  options?: { inviteId?: string }
 ) => {
   const memberId = `${boardId}_${user.uid}`;
   const memberRef = doc(db, MEMBERS_COLLECTION, memberId);
   const snapshot = await getDoc(memberRef);
-  const normalizedRole = normalizeBoardRole(role);
+  const storedRole: BoardRole = role === "owner" ? "owner" : normalizeBoardRole(role);
 
   if (snapshot.exists()) {
     const data = snapshot.data() as BoardMember;
@@ -163,14 +188,20 @@ export const ensureBoardMember = async (
     return;
   }
 
-  await setDoc(memberRef, {
+  const payload: Record<string, unknown> = {
     boardId,
     uid: user.uid,
-    role: normalizedRole,
+    role: storedRole,
     displayName: getDisplayName(user),
     email: user.email || "",
     joinedAt: Date.now(),
-  });
+  };
+
+  if (typeof options?.inviteId === "string" && options.inviteId.trim()) {
+    payload.inviteId = options.inviteId.trim();
+  }
+
+  await setDoc(memberRef, payload);
 };
 
 export const subscribeBoardMembers = (
@@ -187,13 +218,15 @@ export const subscribeBoardMembers = (
       ...(docSnap.data() as Omit<BoardMember, "id">),
     }));
     const roleOrder = {
-      admin: 0,
-      member: 1,
+      owner: 0,
+      admin: 1,
+      member: 2,
     };
+    const sortRole = (role: BoardRole) =>
+      role === "owner" ? "owner" : normalizeBoardRole(role);
     members.sort((a, b) => {
       const roleDiff =
-        roleOrder[normalizeBoardRole(a.role)] -
-        roleOrder[normalizeBoardRole(b.role)];
+        roleOrder[sortRole(a.role)] - roleOrder[sortRole(b.role)];
       if (roleDiff !== 0) return roleDiff;
       return a.displayName.localeCompare(b.displayName);
     });
@@ -259,7 +292,9 @@ export const acceptInvite = async (
   invite: BoardInvite,
   user: User
 ) => {
-  await ensureBoardMember(invite.boardId, user, invite.role);
+  await ensureBoardMember(invite.boardId, user, invite.role, {
+    inviteId: invite.id,
+  });
   const inviteRef = doc(db, INVITES_COLLECTION, invite.id);
   await updateDoc(inviteRef, {
     status: "accepted",

@@ -104,14 +104,15 @@ export const BoardProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const createBoard = useCallback(
-    async (params: { name: string; description?: string }) => {
+    async (params: { name: string; description?: string; projectId: string }) => {
       if (!user) return;
       const board = await createBoardDoc({
         name: params.name,
         description: params.description,
         createdBy: user.uid,
+        projectId: params.projectId,
       });
-      await ensureBoardMember(board.id, user, "admin");
+      await ensureBoardMember(board.id, user, "owner");
       await createDefaultColumns(board.id);
       await logActivity({
         boardId: board.id,

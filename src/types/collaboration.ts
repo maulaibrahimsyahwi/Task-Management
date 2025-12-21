@@ -1,5 +1,15 @@
 export type BoardRole = "owner" | "admin" | "member";
 
+export type Project = {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: number;
+  createdBy: string;
+  updatedAt?: number;
+  defaultBoardId?: string;
+};
+
 export type Board = {
   id: string;
   name: string;
@@ -7,6 +17,7 @@ export type Board = {
   createdAt: number;
   createdBy: string;
   updatedAt?: number;
+  projectId?: string;
 };
 
 export type UserProfile = {
@@ -17,6 +28,7 @@ export type UserProfile = {
   createdAt: number;
   lastActiveAt?: number;
   defaultBoardId?: string;
+  defaultProjectId?: string;
 };
 
 export type BoardMember = {

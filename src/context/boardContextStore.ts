@@ -7,7 +7,7 @@ export type BoardContextValue = {
   activeBoardId: string | null;
   activeBoard: Board | null;
   setActiveBoardId: (boardId: string) => void;
-  createBoard: (params: { name: string; description?: string }) => Promise<void>;
+  createBoard: (params: { name: string; description?: string; projectId: string }) => Promise<void>;
   updateBoard: (
     boardId: string,
     updates: { name?: string; description?: string }
@@ -19,4 +19,3 @@ export type BoardContextValue = {
 export const BoardContext = createContext<BoardContextValue | undefined>(
   undefined
 );
-

@@ -5,6 +5,7 @@ import {
   doc,
   documentId,
   getDocs,
+  limit,
   onSnapshot,
   query,
   updateDoc,
@@ -65,6 +66,7 @@ export const createBoard = async (params: {
   name: string;
   description?: string;
   createdBy: string;
+  projectId: string;
 }) => {
   const createdAt = Date.now();
   const payload = {
@@ -73,6 +75,7 @@ export const createBoard = async (params: {
     createdAt,
     updatedAt: createdAt,
     createdBy: params.createdBy,
+    projectId: params.projectId,
   };
   const docRef = await addDoc(collection(db, BOARDS_COLLECTION), payload);
   return { id: docRef.id, ...payload } as Board;
@@ -156,4 +159,17 @@ export const subscribeBoardsByIds = (
   return () => {
     unsubscribes.forEach((unsub) => unsub());
   };
+};
+
+export const getBoardByProjectId = async (projectId: string) => {
+  const q = query(
+    collection(db, BOARDS_COLLECTION),
+    where("projectId", "==", projectId),
+    limit(1)
+  );
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return null;
+  const docSnap = snapshot.docs[0];
+  const data = docSnap.data() as Omit<Board, "id">;
+  return { id: docSnap.id, ...data } as Board;
 };
