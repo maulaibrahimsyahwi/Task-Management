@@ -29,7 +29,7 @@ const sortProjects = (projects: Project[]) =>
     return a.name.localeCompare(b.name);
   });
 
-const chunkArray = <T,>(arr: T[], size: number) => {
+const chunkArray = <T>(arr: T[], size: number) => {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
     chunks.push(arr.slice(i, i + size));
@@ -43,15 +43,16 @@ export const createProject = async (params: {
   createdBy: string;
 }) => {
   const createdAt = Date.now();
+  const projectName = params.name.trim() || "Untitled project"; // Simpan nama project
 
   // 1. Create Project Reference
   const projectRef = doc(collection(db, PROJECTS_COLLECTION));
   // 2. Create Board Reference
   const boardRef = doc(collection(db, BOARDS_COLLECTION));
 
-  // 3. Set Project Data (write project first so board rules can validate ownership)
+  // 3. Set Project Data
   const projectPayload = {
-    name: params.name.trim() || "Untitled project",
+    name: projectName,
     description: params.description?.trim() || "",
     createdAt,
     updatedAt: createdAt,
@@ -60,9 +61,9 @@ export const createProject = async (params: {
   };
   await setDoc(projectRef, projectPayload);
 
-  // 4. Set Board Data
+  // 4. Set Board Data - GUNAKAN NAMA PROJECT DI SINI
   const boardPayload = {
-    name: "Main Board",
+    name: projectName, // <--- UBAH DARI "Main Board" JADI projectName
     description: "Default board for this project",
     createdAt,
     updatedAt: createdAt,
@@ -198,7 +199,9 @@ export const deleteProject = async (projectId: string) => {
         throw err;
       }
       throw new Error(
-        `Failed to delete board (${boardId}) for project (${projectId}): ${String(e)}`
+        `Failed to delete board (${boardId}) for project (${projectId}): ${String(
+          e
+        )}`
       );
     }
   }
