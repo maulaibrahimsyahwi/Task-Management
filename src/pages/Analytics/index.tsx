@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { getBoardData } from "../../services/taskService";
 import { Columns, TaskT } from "../../types";
 import { useBoards } from "../../context/useBoards";
+import { useProjects } from "../../context/useProjects";
+import { getBoardByProjectId } from "../../services/boardService";
+import { getProjectById } from "../../services/projectService";
+import { subscribeSprints } from "../../services/sprintService";
+import type { Project } from "../../types/collaboration";
+import type { Sprint } from "../../types/sprints";
 
 type ProjectMeta = {
   name: string;
@@ -10,8 +17,8 @@ type ProjectMeta = {
   teamMembers: string;
 };
 
-const getProjectMetaKey = (boardId: string) =>
-  `rtm_project_meta_v1_${boardId}`;
+const getProjectMetaKey = (projectId: string) =>
+  `rtm_project_meta_v1_${projectId}`;
 
 const DEFAULT_PROJECT_META: ProjectMeta = {
   name: "Project",
@@ -20,24 +27,29 @@ const DEFAULT_PROJECT_META: ProjectMeta = {
   teamMembers: "Team",
 };
 
-const loadProjectMeta = (boardId: string): ProjectMeta => {
+const loadProjectMeta = (
+  projectId: string,
+  defaults: ProjectMeta
+): ProjectMeta => {
   try {
-    const raw = localStorage.getItem(getProjectMetaKey(boardId));
-    if (!raw) return DEFAULT_PROJECT_META;
+    const raw = localStorage.getItem(getProjectMetaKey(projectId));
+    if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<ProjectMeta>;
-    return { ...DEFAULT_PROJECT_META, ...parsed };
+    return { ...defaults, ...parsed };
   } catch {
-    return DEFAULT_PROJECT_META;
+    return defaults;
   }
 };
 
-const saveProjectMeta = (boardId: string, meta: ProjectMeta) => {
+const saveProjectMeta = (projectId: string, meta: ProjectMeta) => {
   try {
-    localStorage.setItem(getProjectMetaKey(boardId), JSON.stringify(meta));
+    localStorage.setItem(getProjectMetaKey(projectId), JSON.stringify(meta));
   } catch {
     // ignore
   }
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const isClosedListName = (name: string) =>
   /done|closed|complete|completed|finish|selesai/i.test(name);
@@ -78,22 +90,66 @@ const niceStep = (value: number) => {
 };
 
 const Analytics = () => {
-  const { activeBoardId } = useBoards();
+  const { projectId } = useParams();
+  const { projects, activeProjectId, setActiveProjectId } = useProjects();
+  const { setActiveBoardId } = useBoards();
+
+  const [project, setProject] = useState<Project | null>(null);
+  const [boardId, setBoardId] = useState<string | null>(null);
   const [columns, setColumns] = useState<Columns>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<ProjectMeta>(DEFAULT_PROJECT_META);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
 
   useEffect(() => {
     const run = async () => {
       try {
         setLoading(true);
         setError(null);
-        if (!activeBoardId) {
+        setColumns({});
+        setProject(null);
+        setBoardId(null);
+
+        if (!projectId) {
+          setError("No project selected.");
+          return;
+        }
+
+        if (activeProjectId !== projectId) {
+          setActiveProjectId(projectId);
+        }
+
+        let resolvedProject = projects.find((p) => p.id === projectId) ?? null;
+        if (!resolvedProject) {
+          resolvedProject = await getProjectById(projectId);
+        }
+        if (!resolvedProject) {
+          setError("Project not found or you don't have access.");
+          return;
+        }
+        setProject(resolvedProject);
+
+        let resolvedBoardId =
+          typeof resolvedProject.defaultBoardId === "string" &&
+          resolvedProject.defaultBoardId.trim().length > 0
+            ? resolvedProject.defaultBoardId.trim()
+            : null;
+
+        if (!resolvedBoardId) {
+          const board = await getBoardByProjectId(resolvedProject.id);
+          resolvedBoardId = board?.id ?? null;
+        }
+
+        if (!resolvedBoardId) {
+          setError("This project doesn't have a board yet.");
           setColumns({});
           return;
         }
-        const data = await getBoardData(activeBoardId, { autoInit: false });
+        setBoardId(resolvedBoardId);
+        setActiveBoardId(resolvedBoardId);
+
+        const data = await getBoardData(resolvedBoardId, { autoInit: false });
         setColumns(data);
       } catch (e) {
         if (e && typeof e === "object") {
@@ -102,7 +158,7 @@ const Analytics = () => {
             "message" in e ? String((e as { message?: unknown }).message) : "";
           if (code === "permission-denied") {
             setError(
-              `Permission denied while loading analytics (board: ${activeBoardId}).`
+              `Permission denied while loading analytics (project: ${projectId}).`
             );
           } else {
             setError(message || "Failed to load analytics.");
@@ -115,28 +171,47 @@ const Analytics = () => {
       }
     };
     run();
-  }, [activeBoardId]);
+  }, [
+    activeProjectId,
+    projectId,
+    projects,
+    setActiveBoardId,
+    setActiveProjectId,
+  ]);
 
   useEffect(() => {
-    if (!activeBoardId) return;
-    setMeta(loadProjectMeta(activeBoardId));
-  }, [activeBoardId]);
+    if (!boardId) return;
+    const unsubscribe = subscribeSprints(boardId, setSprints, (err) => {
+      console.error("Failed to load sprints for analytics:", err);
+    });
+    return () => unsubscribe();
+  }, [boardId]);
 
   useEffect(() => {
-    if (!activeBoardId) return;
-    saveProjectMeta(activeBoardId, meta);
-  }, [activeBoardId, meta]);
+    if (!projectId) return;
+    const defaults: ProjectMeta = {
+      ...DEFAULT_PROJECT_META,
+      name: project?.name ?? DEFAULT_PROJECT_META.name,
+      description: project?.description ?? DEFAULT_PROJECT_META.description,
+    };
+    setMeta(loadProjectMeta(projectId, defaults));
+  }, [project?.description, project?.name, projectId]);
 
-  if (!activeBoardId) {
-    return (
-      <div className="w-full flex flex-col items-center justify-center py-12 gap-3">
-        <div className="text-xl font-bold text-gray-800">No project selected</div>
-        <div className="text-gray-600 text-center max-w-md">
-          Open a project first so analytics can calculate tasks, progress, and workload.
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!projectId) return;
+    saveProjectMeta(projectId, meta);
+  }, [meta, projectId]);
+
+  const columnMeta = useMemo(() => {
+    const metaById: Record<
+      string,
+      { name: string; stage?: string; wipLimit?: number }
+    > = {};
+    Object.entries(columns).forEach(([colId, col]) => {
+      metaById[colId] = { name: col.name, stage: col.stage, wipLimit: col.wipLimit };
+    });
+    return metaById;
+  }, [columns]);
 
   const summary = useMemo(() => {
     const allTasks: TaskT[] = [];
@@ -207,6 +282,8 @@ const Analytics = () => {
 
     return {
       allTasks,
+      openTasks,
+      closedTasks,
       openCount,
       closedCount,
       totalTasks,
@@ -226,6 +303,110 @@ const Analytics = () => {
     };
   }, [columns]);
 
+  const flowMetrics = useMemo(() => {
+    const taskMeta = Object.entries(columns).flatMap(([colId, col]) => {
+      const closed = col.stage === "done" || isClosedListName(col.name);
+      return col.items.map((task) => ({
+        task,
+        columnId: colId,
+        closed,
+        columnName: col.name,
+        wipLimit: col.wipLimit,
+      }));
+    });
+
+    const wipByColumn = Object.entries(columns).map(([colId, col]) => ({
+      id: colId,
+      name: col.name,
+      count: col.items.length,
+      wipLimit: col.wipLimit,
+    }));
+
+    const overLimit = wipByColumn.filter(
+      (w) => typeof w.wipLimit === "number" && w.count > (w.wipLimit ?? 0)
+    );
+
+    const closedDurations = taskMeta
+      .filter((t) => t.closed)
+      .map((t) => {
+        if (typeof t.task.createdAt !== "number") return null;
+        if (typeof t.task.completedAt !== "number") return null;
+        const diff = t.task.completedAt - t.task.createdAt;
+        return diff > 0 ? diff / DAY_MS : null;
+      })
+      .filter((v): v is number => typeof v === "number");
+
+    const averageCycle =
+      closedDurations.length === 0
+        ? 0
+        : closedDurations.reduce((a, b) => a + b, 0) / closedDurations.length;
+    const medianCycle = (() => {
+      if (!closedDurations.length) return 0;
+      const sorted = [...closedDurations].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+      }
+      return sorted[mid];
+    })();
+
+    const throughput7d = taskMeta.filter((t) => {
+      if (!t.closed) return false;
+      if (typeof t.task.completedAt !== "number") return false;
+      return t.task.completedAt >= Date.now() - 7 * DAY_MS;
+    }).length;
+
+    const aging = taskMeta
+      .filter((t) => !t.closed)
+      .map((t) => {
+        const created = typeof t.task.createdAt === "number" ? t.task.createdAt : Date.now();
+        const age = Math.max(0, Date.now() - created) / DAY_MS;
+        return { ...t, age };
+      })
+      .sort((a, b) => b.age - a.age)
+      .slice(0, 3);
+
+    return {
+      wipByColumn,
+      overLimit,
+      averageCycle,
+      medianCycle,
+      throughput7d,
+      aging,
+    };
+  }, [columns]);
+
+  const sprintAnalytics = useMemo(() => {
+    if (!sprints.length) return null;
+    const active =
+      sprints.find((s) => s.status === "active") ??
+      sprints.find((s) => s.status === "planned") ??
+      sprints[0];
+
+    if (!active) return null;
+
+    const sprintTasks = summary.allTasks.filter((t) => t.sprintId === active.id);
+    const closedSprintTasks = sprintTasks.filter((t) => {
+      const status = (t as TaskT & { status?: string }).status;
+      const meta = status ? columnMeta[status] : undefined;
+      const colStage = meta?.stage;
+      const colName = meta?.name || "";
+      return colStage === "done" || isClosedListName(colName);
+    });
+
+    const total = sprintTasks.length;
+    const done = closedSprintTasks.length;
+    const progress = total === 0 ? 0 : Math.round((done / total) * 100);
+
+    return {
+      active,
+      total,
+      done,
+      open: total - done,
+      progress,
+    };
+  }, [columnMeta, sprints, summary.allTasks]);
+
   if (loading) {
     return (
       <div className="w-full flex items-center justify-center py-10">
@@ -241,6 +422,12 @@ const Analytics = () => {
       <div className="w-full flex flex-col items-center justify-center py-12 gap-3">
         <div className="text-xl font-bold text-gray-800">Analytics unavailable</div>
         <div className="text-gray-600 text-center max-w-md">{error}</div>
+        <Link
+          to="/projects"
+          className="text-sm font-bold text-orange-500 hover:text-orange-600"
+        >
+          Go to projects
+        </Link>
       </div>
     );
   }
@@ -253,6 +440,11 @@ const Analytics = () => {
             <div className="text-lg font-bold text-gray-800">
               Project info &amp; description
             </div>
+            {project ? (
+              <div className="mt-1 text-sm text-gray-500 font-semibold">
+                {project.name}
+              </div>
+            ) : null}
             <input
               value={meta.name}
               onChange={(e) => setMeta((m) => ({ ...m, name: e.target.value }))}
@@ -522,6 +714,195 @@ const Analytics = () => {
           </div>
         </div>
       </div>
+
+      <div className="grid md:grid-cols-2 grid-cols-1 gap-4">
+        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="text-lg font-bold text-gray-800">Flow health</div>
+              <div className="text-sm text-gray-600">
+                WIP by column &amp; limit breaches.
+              </div>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
+              KANBAN
+            </span>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2">
+            {flowMetrics.wipByColumn.map((wip) => (
+              <div
+                key={wip.id}
+                className={`flex items-center justify-between rounded-md border px-3 py-2 ${
+                  flowMetrics.overLimit.some((o) => o.id === wip.id)
+                    ? "border-red-200 bg-red-50"
+                    : "border-gray-100 bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-slate-400" />
+                  <span className="text-sm font-semibold text-gray-800">
+                    {wip.name}
+                  </span>
+                </div>
+                <div className="text-sm font-bold text-gray-800">
+                  {wip.count}
+                  {typeof wip.wipLimit === "number" ? ` / ${wip.wipLimit}` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {flowMetrics.overLimit.length ? (
+            <div className="mt-3 text-sm text-red-600 font-semibold">
+              Warning: {flowMetrics.overLimit.length} column(s) over WIP limit — tuntaskan dulu sebelum tarik task baru.
+            </div>
+          ) : (
+            <div className="mt-3 text-sm text-green-600 font-semibold">
+              WIP masih aman. Jaga ritme kerja.
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="text-lg font-bold text-gray-800">
+                Cycle time &amp; throughput
+              </div>
+              <div className="text-sm text-gray-600">
+                Lead time dihitung dari created → selesai.
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-4">
+            {[
+              {
+                label: "Avg cycle (hari)",
+                value: flowMetrics.averageCycle,
+              },
+              {
+                label: "Median cycle (hari)",
+                value: flowMetrics.medianCycle,
+              },
+              {
+                label: "Throughput (7d)",
+                value: flowMetrics.throughput7d,
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3"
+              >
+                <div className="text-xs text-gray-500 font-semibold">
+                  {item.label}
+                </div>
+                <div className="text-xl font-bold text-gray-800 mt-1">
+                  {typeof item.value === "number"
+                    ? formatNumber(item.value)
+                    : item.value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-800 mb-2">
+              Oldest open tasks
+            </div>
+            {flowMetrics.aging.length === 0 ? (
+              <div className="text-sm text-gray-500">Tidak ada task terbuka.</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {flowMetrics.aging.map((item) => (
+                  <div
+                    key={item.task.id}
+                    className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 flex items-center justify-between"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-gray-800">
+                        {item.task.title || "Untitled task"}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        Kolom: {item.columnName}
+                      </span>
+                    </div>
+                    <span className="text-sm font-bold text-gray-800">
+                      {formatNumber(item.age)}d
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {sprintAnalytics ? (
+        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="text-lg font-bold text-gray-800">
+                Sprint analytics
+              </div>
+              <div className="text-sm text-gray-600">
+                Menampilkan sprint aktif / berikutnya.
+              </div>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold">
+              SPRINT
+            </span>
+          </div>
+
+          <div className="mt-4 grid md:grid-cols-4 grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs text-gray-500 font-semibold">Sprint</div>
+              <div className="text-lg font-bold text-gray-800">
+                {sprintAnalytics.active.name}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 font-semibold">Status</div>
+              <div className="text-sm font-bold text-gray-800 capitalize">
+                {sprintAnalytics.active.status}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 font-semibold">Tasks</div>
+              <div className="text-sm font-bold text-gray-800">
+                {sprintAnalytics.done}/{sprintAnalytics.total} selesai
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 font-semibold">Dates</div>
+              <div className="text-sm font-semibold text-gray-800">
+                {sprintAnalytics.active.startDate || "—"} →{" "}
+                {sprintAnalytics.active.endDate || "—"}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              Progress: {sprintAnalytics.progress}%
+            </div>
+            <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-600"
+                style={{ width: `${sprintAnalytics.progress}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : sprints.length ? (
+        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+          <div className="text-lg font-bold text-gray-800">Sprint analytics</div>
+          <div className="text-sm text-gray-600 mt-1">
+            Belum ada sprint aktif. Aktifkan sprint untuk melihat progress.
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

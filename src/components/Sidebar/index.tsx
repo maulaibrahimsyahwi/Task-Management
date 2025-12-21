@@ -6,11 +6,13 @@ import {
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
+import { useProjects } from "../../context/useProjects";
 import taskFlowLogo from "../../assets/images/Task Flow.png";
 import taskFlowMiniLogo from "../../assets/images/Task Flow-Mini.png";
 
 const Sidebar = () => {
   const { signOut } = useAuth();
+  const { activeProjectId } = useProjects();
   const navLinks = [
     {
       title: "Home",
@@ -25,7 +27,7 @@ const Sidebar = () => {
     {
       title: "Analytics",
       icon: <PieChart color="#555" size={22} />,
-      to: "/analytics",
+      to: activeProjectId ? `/analytics/${activeProjectId}` : "/analytics",
     },
   ];
   return (

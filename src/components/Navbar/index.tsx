@@ -11,6 +11,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { UiPreferences } from "../../types/ui";
 import type { ActivityNotification } from "../../types/notifications";
+import { useProjects } from "../../context/useProjects";
 
 type NavbarProps = {
   uiPreferences: UiPreferences;
@@ -22,12 +23,6 @@ type NavbarProps = {
 
 type OpenMenu = "pages" | "settings" | "notifications" | null;
 
-const NAV_ITEMS = [
-  { title: "Home", to: "/home" },
-  { title: "Projects", to: "/projects" },
-  { title: "Analytics", to: "/analytics" },
-];
-
 const Navbar = ({
   uiPreferences,
   onUiPreferencesChange,
@@ -35,20 +30,38 @@ const Navbar = ({
   onClearNotifications,
   onRemoveNotification,
 }: NavbarProps) => {
+  const { activeProjectId } = useProjects();
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const navItems = useMemo(
+    () => [
+      { title: "Home", to: "/home", matchPrefix: "/home" },
+      { title: "Projects", to: "/projects", matchPrefix: "/projects" },
+      {
+        title: "Analytics",
+        to: activeProjectId ? `/analytics/${activeProjectId}` : "/analytics",
+        matchPrefix: "/analytics",
+      },
+    ],
+    [activeProjectId]
+  );
+
   const pageTitle = useMemo(() => {
-    const item = NAV_ITEMS.find((i) => i.to === location.pathname);
+    const item = navItems.find(
+      (i) =>
+        location.pathname === i.matchPrefix ||
+        location.pathname.startsWith(`${i.matchPrefix}/`)
+    );
     if (item) return item.title;
     if (location.pathname.startsWith("/board")) return "Board";
     if (location.pathname.startsWith("/projects")) return "Projects";
     if (location.pathname.startsWith("/analytics")) return "Analytics";
     if (location.pathname.startsWith("/home")) return "Home";
     return "Board";
-  }, [location.pathname]);
+  }, [location.pathname, navItems]);
 
   useEffect(() => {
     if (!toast) return;
@@ -104,23 +117,28 @@ const Navbar = ({
 
         {openMenu === "pages" ? (
           <div className="absolute top-[55px] left-0 w-[220px] bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden z-50">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => {
+              const isActive =
+                location.pathname === item.matchPrefix ||
+                location.pathname.startsWith(`${item.matchPrefix}/`);
+              return (
               <Link
                 key={item.to}
                 to={item.to}
                 onClick={() => setOpenMenu(null)}
                 className={`w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 text-sm font-semibold ${
-                  location.pathname === item.to
+                  isActive
                     ? "text-orange-500"
                     : "text-gray-700"
                 }`}
               >
                 <span>{item.title}</span>
-                {location.pathname === item.to ? (
+                {isActive ? (
                   <span className="text-xs font-bold">Active</span>
                 ) : null}
               </Link>
-            ))}
+              );
+            })}
           </div>
         ) : null}
       </div>
