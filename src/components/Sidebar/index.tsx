@@ -1,9 +1,8 @@
 import {
-  LayoutDashboard,
-  Grid,
   Home,
   LogOut,
   PieChart,
+  Grid,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
@@ -16,11 +15,6 @@ const Sidebar = () => {
       title: "Home",
       icon: <Home color="#555" size={22} />,
       to: "/home",
-    },
-    {
-      title: "Boards",
-      icon: <LayoutDashboard color="#555" size={22} />,
-      to: "/boards",
     },
     {
       title: "Projects",

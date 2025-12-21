@@ -48,14 +48,18 @@ import {
   type SwimlaneMode,
 } from "./boardTypes";
 
-const BoardsPage = () => {
+type BoardsPageProps = {
+  boardId?: string;
+};
+
+const BoardsPage = ({ boardId: boardIdProp }: BoardsPageProps) => {
   const { searchQuery, uiPreferences, addNotification } =
     useOutletContext<LayoutOutletContext>();
   const { user, profile } = useAuth();
   const { boardId: paramBoardId } = useParams();
   const { activeBoardId, setActiveBoardId, activeBoard, memberships } =
     useBoards();
-  const boardId = paramBoardId || activeBoardId || "";
+  const boardId = boardIdProp || paramBoardId || activeBoardId || "";
   const boardRole = boardId ? getBoardRole(boardId, memberships) : "member";
   const canManageLists = isAdminRole(boardRole);
   const [columns, setColumns] = useState<Columns>({});
@@ -174,10 +178,42 @@ const BoardsPage = () => {
   }, [activeSprint, filters, isSearching, normalizedSearch]);
 
   useEffect(() => {
+    if (boardIdProp && boardIdProp !== activeBoardId) {
+      setActiveBoardId(boardIdProp);
+      return;
+    }
     if (paramBoardId && paramBoardId !== activeBoardId) {
       setActiveBoardId(paramBoardId);
     }
-  }, [activeBoardId, paramBoardId, setActiveBoardId]);
+  }, [activeBoardId, boardIdProp, paramBoardId, setActiveBoardId]);
+
+  const describeTaskSaveError = (e: unknown) => {
+    if (e && typeof e === "object") {
+      const code =
+        "code" in e ? String((e as { code?: unknown }).code) : "";
+      const message =
+        "message" in e ? String((e as { message?: unknown }).message) : "";
+      if (code === "permission-denied") {
+        return `Permission denied while saving the task (board: ${boardId}). Make sure \`firestore.rules\` has been deployed to your Firebase project.`;
+      }
+      return message || "Failed to save task.";
+    }
+    return "Failed to save task.";
+  };
+
+  const describeSnapshotError = (label: string, e: unknown) => {
+    if (e && typeof e === "object") {
+      const code =
+        "code" in e ? String((e as { code?: unknown }).code) : "";
+      const message =
+        "message" in e ? String((e as { message?: unknown }).message) : "";
+      if (code === "permission-denied") {
+        return `${label}: permission denied (board: ${boardId}).`;
+      }
+      return message ? `${label}: ${message}` : `${label}: failed.`;
+    }
+    return `${label}: failed.`;
+  };
 
   useEffect(() => {
     if (!boardId) return;
@@ -202,24 +238,33 @@ const BoardsPage = () => {
 
   useEffect(() => {
     if (!user || !boardId) return;
-    return subscribeBoardMembers(boardId, setMembers);
-  }, [boardId, user]);
+    return subscribeBoardMembers(boardId, setMembers, (error) => {
+      console.error("Error fetching board members:", error);
+      addNotification(describeSnapshotError("Failed to load members", error));
+    });
+  }, [addNotification, boardId, user]);
 
   useEffect(() => {
     if (!boardId) {
       setSprints([]);
       return;
     }
-    return subscribeSprints(boardId, setSprints);
-  }, [boardId]);
+    return subscribeSprints(boardId, setSprints, (error) => {
+      console.error("Error fetching sprints:", error);
+      addNotification(describeSnapshotError("Failed to load sprints", error));
+    });
+  }, [addNotification, boardId]);
 
   useEffect(() => {
     if (!boardId) {
       setAutomationRules([]);
       return;
     }
-    return subscribeAutomationRules(boardId, setAutomationRules);
-  }, [boardId]);
+    return subscribeAutomationRules(boardId, setAutomationRules, (error) => {
+      console.error("Error fetching automations:", error);
+      addNotification(describeSnapshotError("Failed to load automations", error));
+    });
+  }, [addNotification, boardId]);
 
   const handleInitializeBoard = async () => {
     if (!boardId || initializing) return;
@@ -481,7 +526,7 @@ const BoardsPage = () => {
       closeModal();
     } catch (error) {
       console.error("Error saving task:", error);
-      addNotification("Failed to save task.");
+      addNotification(describeTaskSaveError(error));
     }
   };
 
@@ -567,7 +612,7 @@ const BoardsPage = () => {
       return;
     try {
       const colName = columns[columnId]?.name;
-      await deleteColumn(columnId);
+      await deleteColumn(columnId, boardId);
       const newColumns = { ...columns };
       delete newColumns[columnId];
       setColumns(newColumns);
@@ -584,7 +629,7 @@ const BoardsPage = () => {
       }
     } catch (error) {
       console.error("Error deleting column:", error);
-      addNotification("Failed to delete list.");
+      addNotification(describeSnapshotError("Failed to delete list", error));
     }
   };
 

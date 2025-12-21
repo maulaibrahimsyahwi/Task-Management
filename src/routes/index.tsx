@@ -1,70 +1,40 @@
-import { Navigate, RouteObject } from "react-router";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import RequireAuth from "../components/RequireAuth";
 import Layout from "../layout";
 import Auth from "../pages/Auth";
 import Home from "../pages/Home";
-import Boards from "../pages/Boards";
-import BoardsHub from "../pages/BoardsHub";
-import Projects from "../pages/Projects";
-import ProjectBoard from "../pages/ProjectBoard";
-import Analytics from "../pages/Analytics";
 import NotFound from "../pages/NotFound";
+import Analytics from "../pages/Analytics";
+import ProjectBoard from "../pages/ProjectBoard";
+import Projects from "../pages/Projects";
 
-const routes: RouteObject[] = [
-  {
-    path: "/auth",
-    element: <Auth />,
-  },
-  {
-    path: "/",
-    element: (
-      <RequireAuth>
-        <Layout />
-      </RequireAuth>
-    ),
-    children: [
-      {
-        index: true,
-        element: <Navigate to="/projects" replace />,
-      },
-      {
-        path: "home",
-        element: <Home />,
-      },
-      {
-        path: "boards",
-        element: <Boards />,
-      },
-      {
-        path: "boards/manage",
-        element: <BoardsHub />,
-      },
-      {
-        path: "boards/:boardId",
-        element: <Boards />,
-      },
-      {
-        path: "projects",
-        element: <Projects />,
-      },
-      {
-        path: "projects/boards/:projectId",
-        element: <ProjectBoard />,
-      },
-      {
-        path: "projects/:projectId",
-        element: <ProjectBoard />,
-      },
-      {
-        path: "analytics",
-        element: <Analytics />,
-      },
-      {
-        path: "*",
-        element: <NotFound />,
-      },
-    ],
-  },
-];
+const ProjectToBoardRedirect = () => {
+  const { projectId } = useParams();
+  if (!projectId) return <Navigate to="/projects" replace />;
+  return <Navigate to={`/board/${projectId}`} replace />;
+};
 
-export default routes;
+const AppRoutes = () => {
+  return (
+    <Routes>
+      <Route path="/auth" element={<Auth />} />
+
+      <Route element={<RequireAuth />}>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/home" element={<Home />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/:projectId" element={<ProjectToBoardRedirect />} />
+          <Route path="/board/:projectId" element={<ProjectBoard />} />
+          <Route path="/analytics" element={<Analytics />} />
+        </Route>
+      </Route>
+
+      <Route path="/404" element={<NotFound />} />
+      <Route path="*" element={<Navigate to="/404" replace />} />
+    </Routes>
+  );
+};
+
+export default AppRoutes;

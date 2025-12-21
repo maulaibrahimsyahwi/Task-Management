@@ -1,8 +1,7 @@
-import type { ReactElement } from "react";
-import { Navigate } from "react-router";
+import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
 
-const RequireAuth = ({ children }: { children: ReactElement }) => {
+const RequireAuth = () => {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -17,7 +16,7 @@ const RequireAuth = ({ children }: { children: ReactElement }) => {
     return <Navigate to="/auth" replace />;
   }
 
-  return children;
+  return <Outlet />;
 };
 
 export default RequireAuth;

@@ -65,18 +65,23 @@ export const deleteAutomationRule = async (ruleId: string) => {
 
 export const subscribeAutomationRules = (
   boardId: string,
-  onChange: (rules: AutomationRule[]) => void
+  onChange: (rules: AutomationRule[]) => void,
+  onError?: (error: Error) => void
 ) => {
   const q = query(
     collection(db, AUTOMATION_COLLECTION),
     where("boardId", "==", boardId)
   );
-  return onSnapshot(q, (snapshot) => {
-    const rules = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...(docSnap.data() as Omit<AutomationRule, "id">),
-    }));
-    rules.sort((a, b) => b.createdAt - a.createdAt);
-    onChange(rules);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const rules = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<AutomationRule, "id">),
+      }));
+      rules.sort((a, b) => b.createdAt - a.createdAt);
+      onChange(rules);
+    },
+    (error) => onError?.(error as Error)
+  );
 };

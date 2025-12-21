@@ -4,57 +4,73 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    function boardPath(boardId) {
+      return /databases/$(database)/documents/boards/$(boardId);
+    }
+
+    function projectPath(projectId) {
+      return /databases/$(database)/documents/projects/$(projectId);
+    }
+
+    function invitePath(inviteId) {
+      return /databases/$(database)/documents/invites/$(inviteId);
+    }
+
+    function memberPath(boardId, uid) {
+      return /databases/$(database)/documents/boardMembers/$(boardId + "_" + uid);
+    }
 
     function boardDoc(boardId) {
-      return get(/databases/$(database)/documents/boards/$(boardId));
+      return get(boardPath(boardId));
     }
 
     function projectDoc(projectId) {
-      return get(/databases/$(database)/documents/projects/$(projectId));
+      return get(projectPath(projectId));
     }
 
     function inviteDoc(inviteId) {
-      return get(/databases/$(database)/documents/invites/$(inviteId));
+      return get(invitePath(inviteId));
     }
 
     function memberDoc(boardId) {
-      return get(/databases/$(database)/documents/boardMembers/$(boardId + "_" + request.auth.uid));
+      return get(memberPath(boardId, request.auth.uid));
     }
 
     function isBoardMember(boardId) {
-      return isSignedIn() && memberDoc(boardId).exists();
+      return isSignedIn() && exists(memberPath(boardId, request.auth.uid));
     }
 
     function isBoardCreator(boardId) {
       let board = boardDoc(boardId);
       return isSignedIn() &&
-        board.exists() &&
+        exists(boardPath(boardId)) &&
         board.data.createdBy == request.auth.uid;
     }
 
     function isProjectOwner(projectId) {
       let project = projectDoc(projectId);
       return isSignedIn() &&
-        project.exists() &&
+        exists(projectPath(projectId)) &&
         project.data.createdBy == request.auth.uid;
     }
 
     function isBoardOwner(boardId) {
-      return isBoardCreator(boardId);
-    }
-
-    function isBoardAdmin(boardId) {
-      return isBoardMember(boardId) &&
-        (memberDoc(boardId).data.role == "owner" ||
-         memberDoc(boardId).data.role == "admin");
+      let board = boardDoc(boardId);
+      return isSignedIn() &&
+        (
+          isBoardCreator(boardId) ||
+          (isBoardMember(boardId) && memberDoc(boardId).data.role == "owner") ||
+          (
+            exists(boardPath(boardId)) &&
+            (board.data.projectId is string) &&
+            exists(projectPath(board.data.projectId)) &&
+            projectDoc(board.data.projectId).data.createdBy == request.auth.uid
+          )
+        );
     }
 
     function isBoardMemberOrOwner(boardId) {
       return isBoardMember(boardId) || isBoardOwner(boardId);
-    }
-
-    function isBoardAdminOrOwner(boardId) {
-      return isBoardAdmin(boardId) || isBoardOwner(boardId);
     }
 
     function isValidMemberId(memberId, boardId, uid) {
@@ -64,7 +80,7 @@ service cloud.firestore {
     function isValidInviteForBoard(boardId, inviteId) {
       return isSignedIn() &&
         (inviteId is string) &&
-        inviteDoc(inviteId).exists() &&
+        exists(invitePath(inviteId)) &&
         inviteDoc(inviteId).data.boardId == boardId &&
         inviteDoc(inviteId).data.email == request.auth.token.email &&
         inviteDoc(inviteId).data.status == "pending";
@@ -82,7 +98,15 @@ service cloud.firestore {
     }
 
     match /projects/{projectId} {
-      allow read: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow read: if isSignedIn() &&
+        (
+          resource.data.createdBy == request.auth.uid ||
+          (
+            (resource.data.defaultBoardId is string) &&
+            resource.data.defaultBoardId.size() > 0 &&
+            isBoardMemberOrOwner(resource.data.defaultBoardId)
+          )
+        );
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isSignedIn() &&
         resource.data.createdBy == request.auth.uid &&
@@ -95,6 +119,7 @@ service cloud.firestore {
       allow read: if isSignedIn() &&
         (boardId == "default" ||
          isBoardMember(boardId) ||
+         ((resource.data.projectId is string) && isProjectOwner(resource.data.projectId)) ||
          resource.data.createdBy == request.auth.uid);
       allow create: if isSignedIn() &&
         request.resource.data.createdBy == request.auth.uid &&
@@ -102,22 +127,23 @@ service cloud.firestore {
         request.resource.data.projectId.size() > 0 &&
         isProjectOwner(request.resource.data.projectId);
       allow update: if isSignedIn() &&
-        resource.data.createdBy == request.auth.uid &&
+        isBoardOwner(boardId) &&
         request.resource.data.createdBy == resource.data.createdBy &&
         request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.projectId == resource.data.projectId;
-      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow delete: if isSignedIn() && isBoardOwner(boardId);
     }
 
     match /sprints/{sprintId} {
       allow read: if isBoardMemberOrOwner(resource.data.boardId);
-      allow create: if isBoardAdminOrOwner(request.resource.data.boardId);
-      allow update, delete: if isBoardAdminOrOwner(resource.data.boardId);
+      allow create: if isBoardOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardOwner(resource.data.boardId);
     }
 
     match /boardMembers/{memberId} {
       allow read: if isSignedIn() &&
         (resource.data.uid == request.auth.uid ||
+         resource.data.userId == request.auth.uid ||
          isBoardMember(resource.data.boardId) ||
          isBoardOwner(resource.data.boardId));
       allow create: if isSignedIn() &&
@@ -126,12 +152,12 @@ service cloud.firestore {
         isValidMemberId(memberId, request.resource.data.boardId, request.resource.data.uid) &&
         request.resource.data.uid == request.auth.uid &&
         request.resource.data.boardId != "default" &&
-        boardDoc(request.resource.data.boardId).exists() &&
+        exists(boardPath(request.resource.data.boardId)) &&
         (
           (isBoardCreator(request.resource.data.boardId) &&
             request.resource.data.role == "owner") ||
           (!isBoardCreator(request.resource.data.boardId) &&
-            request.resource.data.role in ["admin", "member"] &&
+            request.resource.data.role == "member" &&
             isValidInviteForBoard(request.resource.data.boardId, request.resource.data.inviteId) &&
             request.resource.data.role == inviteDoc(request.resource.data.inviteId).data.role)
         );
@@ -148,7 +174,7 @@ service cloud.firestore {
               (resource.data.uid == boardDoc(resource.data.boardId).data.createdBy &&
                 request.resource.data.role == "owner") ||
               (resource.data.uid != boardDoc(resource.data.boardId).data.createdBy &&
-                request.resource.data.role in ["admin", "member"])
+                request.resource.data.role == "member")
             ))
         );
       allow delete: if isSignedIn() && isBoardOwner(resource.data.boardId);
@@ -156,8 +182,8 @@ service cloud.firestore {
 
     match /columns/{columnId} {
       allow read: if isBoardMemberOrOwner(resource.data.boardId);
-      allow create: if isBoardAdminOrOwner(request.resource.data.boardId);
-      allow update, delete: if isBoardAdminOrOwner(resource.data.boardId);
+      allow create: if isBoardOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardOwner(resource.data.boardId);
     }
 
     match /tasks/{taskId} {
@@ -174,7 +200,7 @@ service cloud.firestore {
         (request.resource.data.boardId is string) &&
         (request.resource.data.email is string) &&
         request.resource.data.email.size() > 0 &&
-        (request.resource.data.role in ["admin", "member"]) &&
+        (request.resource.data.role == "member") &&
         request.resource.data.status == "pending" &&
         request.resource.data.invitedByUid == request.auth.uid &&
         (request.resource.data.createdAt is int || request.resource.data.createdAt is float);
@@ -189,25 +215,28 @@ service cloud.firestore {
     match /activity/{activityId} {
       allow read: if isBoardMemberOrOwner(resource.data.boardId);
       allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isBoardOwner(resource.data.boardId);
     }
 
     match /automations/{ruleId} {
       allow read: if isBoardMemberOrOwner(resource.data.boardId);
-      allow create: if isBoardAdminOrOwner(request.resource.data.boardId);
-      allow update, delete: if isBoardAdminOrOwner(resource.data.boardId);
+      allow create: if isBoardOwner(request.resource.data.boardId);
+      allow update, delete: if isBoardOwner(resource.data.boardId);
     }
 
     match /taskComments/{commentId} {
       allow read: if isBoardMemberOrOwner(resource.data.boardId);
       allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isBoardOwner(resource.data.boardId);
     }
 
     match /timeLogs/{logId} {
       allow read: if isBoardMemberOrOwner(resource.data.boardId);
       allow create: if isBoardMemberOrOwner(request.resource.data.boardId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isBoardOwner(resource.data.boardId);
     }
   }
 }

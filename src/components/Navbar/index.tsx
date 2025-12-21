@@ -28,7 +28,6 @@ type OpenMenu = "pages" | "settings" | "notifications" | "boards" | null;
 
 const NAV_ITEMS = [
   { title: "Home", to: "/home" },
-  { title: "Boards", to: "/boards" },
   { title: "Projects", to: "/projects" },
   { title: "Analytics", to: "/analytics" },
 ];
@@ -51,7 +50,7 @@ const Navbar = ({
   const pageTitle = useMemo(() => {
     const item = NAV_ITEMS.find((i) => i.to === location.pathname);
     if (item) return item.title;
-    if (location.pathname.startsWith("/boards")) return "Boards";
+    if (location.pathname.startsWith("/board")) return "Board";
     if (location.pathname.startsWith("/projects")) return "Projects";
     if (location.pathname.startsWith("/analytics")) return "Analytics";
     if (location.pathname.startsWith("/home")) return "Home";

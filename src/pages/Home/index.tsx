@@ -54,7 +54,7 @@ type TaskRow = TaskT & {
   const Home = () => {
   const { user, profile } = useAuth();
   const { activeBoardId, activeBoard, boards } = useBoards();
-  const boardLink = activeBoardId ? `/boards/${activeBoardId}` : "/boards";
+  const boardLink = activeBoard?.projectId ? `/board/${activeBoard.projectId}` : "/projects";
   const [columns, setColumns] = useState<Columns>({});
   const [members, setMembers] = useState<BoardMember[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -62,7 +62,7 @@ type TaskRow = TaskT & {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<BoardRole>("member");
+  const inviteRole: BoardRole = "member";
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteSending, setInviteSending] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
@@ -162,7 +162,7 @@ type TaskRow = TaskT & {
   const handleSendInvite = async () => {
     if (!user || !activeBoardId) return;
     if (!canManageMembers) {
-      setInviteMessage("Only admins can invite members.");
+      setInviteMessage("Only the owner can invite members.");
       return;
     }
     const trimmed = inviteEmail.trim();
@@ -290,10 +290,10 @@ type TaskRow = TaskT & {
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <Link
-            to="/boards"
+            to="/projects"
             className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-orange-400 text-white font-medium hover:bg-orange-500"
           >
-            Open Boards
+            Open Projects
           </Link>
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2 bg-slate-100 rounded-md px-3 py-2">
@@ -305,15 +305,6 @@ type TaskRow = TaskT & {
                 className="bg-transparent outline-none text-sm w-full"
                 disabled={!activeBoardId || !canManageMembers}
               />
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as BoardRole)}
-                className="bg-transparent text-sm outline-none"
-                disabled={!activeBoardId || !canManageMembers}
-              >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
-              </select>
               <button
                 type="button"
                 onClick={handleSendInvite}
@@ -371,10 +362,10 @@ type TaskRow = TaskT & {
             Boards help your team organize tasks, deadlines, and collaboration.
           </div>
           <Link
-            to="/boards"
+            to="/projects"
             className="inline-flex items-center justify-center mt-4 px-4 py-2 rounded-md bg-orange-400 text-white font-medium hover:bg-orange-500"
           >
-            Go to Boards
+            Go to Projects
           </Link>
         </div>
       ) : (
@@ -539,7 +530,11 @@ type TaskRow = TaskT & {
                               className="text-xs bg-slate-100 border border-slate-200 rounded px-2 py-1"
                             >
                               <option value="member">Member</option>
-                              <option value="admin">Admin</option>
+                              {roleValue === "admin" ? (
+                                <option value="admin" disabled>
+                                  Admin (legacy)
+                                </option>
+                              ) : null}
                             </select>
                             <button
                               type="button"

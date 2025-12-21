@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useAuth } from "./useAuth";
-import { createBoard } from "../services/boardService";
-import { ensureBoardMember } from "../services/collaborationService";
-import { createDefaultColumns } from "../services/taskService";
+import { subscribeBoardMemberships } from "../services/collaborationService";
+import { subscribeBoardsByIds } from "../services/boardService";
 import {
   createProject as createProjectDoc,
   deleteProject as deleteProjectDoc,
-  setProjectDefaultBoard,
-  subscribeProjectsByOwner,
+  subscribeProjectsByIds,
   updateProject as updateProjectDoc,
 } from "../services/projectService";
 import {
@@ -42,18 +40,73 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     }
 
     setLoading(true);
-    const unsubscribe = subscribeProjectsByOwner(
+
+    let unsubscribeMemberships = () => {};
+    let unsubscribeBoards = () => {};
+    let unsubscribeProjects = () => {};
+    let lastProjectIdsKey = "";
+
+    unsubscribeMemberships = subscribeBoardMemberships(
       user.uid,
-      (next) => {
-        setProjects(next);
-        setLoading(false);
-      },
-      () => {
-        setProjects([]);
-        setLoading(false);
+      (memberships) => {
+        const boardIds = memberships
+          .map((m) => m.boardId)
+          .filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+
+        unsubscribeBoards();
+        unsubscribeProjects();
+
+        if (boardIds.length === 0) {
+          setProjects([]);
+          setLoading(false);
+          return;
+        }
+
+        unsubscribeBoards = subscribeBoardsByIds(boardIds, (boards) => {
+          const projectIds = Array.from(
+            new Set(
+              boards
+                .map((b) => b.projectId)
+                .filter(
+                  (id): id is string =>
+                    typeof id === "string" && id.trim().length > 0
+                )
+            )
+          );
+
+          // avoid resubscribing when ids are the same set
+          const key = projectIds.slice().sort().join("|");
+          if (key === lastProjectIdsKey) return;
+          lastProjectIdsKey = key;
+
+          unsubscribeProjects();
+          if (projectIds.length === 0) {
+            setProjects([]);
+            setLoading(false);
+            return;
+          }
+
+          setLoading(true);
+          unsubscribeProjects = subscribeProjectsByIds(
+            projectIds,
+            (next) => {
+              setProjects(next);
+              setLoading(false);
+            },
+            () => {
+              setProjects([]);
+              setLoading(false);
+            }
+          );
+        });
       }
     );
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeProjects();
+      unsubscribeBoards();
+      unsubscribeMemberships();
+    };
   }, [user]);
 
   useEffect(() => {
@@ -101,25 +154,20 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const createProject = useCallback(
     async (params: { name: string; description?: string }) => {
       if (!user) return null;
-      const project = await createProjectDoc({
+
+      // Service handles creation of Project, Board, Columns, and Members
+      const newProject = await createProjectDoc({
         name: params.name,
         description: params.description,
         createdBy: user.uid,
       });
 
-      const board = await createBoard({
-        name: project.name,
-        description: project.description,
-        createdBy: user.uid,
-        projectId: project.id,
-      });
+      setActiveProjectId(newProject.id);
 
-      await ensureBoardMember(board.id, user, "owner");
-      await createDefaultColumns(board.id);
-      await setProjectDefaultBoard(project.id, board.id);
-
-      setActiveProjectId(project.id);
-      return { projectId: project.id, boardId: board.id };
+      return {
+        projectId: newProject.id,
+        boardId: newProject.boardId, // Ensure createProjectDoc returns this (it does in updated service)
+      };
     },
     [setActiveProjectId, user]
   );

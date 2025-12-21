@@ -81,17 +81,35 @@ const Analytics = () => {
   const { activeBoardId } = useBoards();
   const [columns, setColumns] = useState<Columns>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<ProjectMeta>(DEFAULT_PROJECT_META);
 
   useEffect(() => {
     const run = async () => {
       try {
+        setLoading(true);
+        setError(null);
         if (!activeBoardId) {
           setColumns({});
           return;
         }
-        const data = await getBoardData(activeBoardId);
+        const data = await getBoardData(activeBoardId, { autoInit: false });
         setColumns(data);
+      } catch (e) {
+        if (e && typeof e === "object") {
+          const code = "code" in e ? String((e as { code?: unknown }).code) : "";
+          const message =
+            "message" in e ? String((e as { message?: unknown }).message) : "";
+          if (code === "permission-denied") {
+            setError(
+              `Permission denied while loading analytics (board: ${activeBoardId}).`
+            );
+          } else {
+            setError(message || "Failed to load analytics.");
+          }
+        } else {
+          setError("Failed to load analytics.");
+        }
       } finally {
         setLoading(false);
       }
@@ -108,6 +126,17 @@ const Analytics = () => {
     if (!activeBoardId) return;
     saveProjectMeta(activeBoardId, meta);
   }, [activeBoardId, meta]);
+
+  if (!activeBoardId) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center py-12 gap-3">
+        <div className="text-xl font-bold text-gray-800">No project selected</div>
+        <div className="text-gray-600 text-center max-w-md">
+          Open a project first so analytics can calculate tasks, progress, and workload.
+        </div>
+      </div>
+    );
+  }
 
   const summary = useMemo(() => {
     const allTasks: TaskT[] = [];
@@ -203,6 +232,15 @@ const Analytics = () => {
         <span className="text-lg font-semibold text-gray-200">
           Loading analytics...
         </span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center py-12 gap-3">
+        <div className="text-xl font-bold text-gray-800">Analytics unavailable</div>
+        <div className="text-gray-600 text-center max-w-md">{error}</div>
       </div>
     );
   }

@@ -12,6 +12,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import type { DocumentData, QuerySnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { createBoard } from "./boardService";
 import { createProject, setProjectDefaultBoard } from "./projectService";
@@ -206,49 +207,146 @@ export const ensureBoardMember = async (
 
 export const subscribeBoardMembers = (
   boardId: string,
-  onChange: (members: BoardMember[]) => void
+  onChange: (members: BoardMember[]) => void,
+  onError?: (error: Error) => void
 ) => {
   const q = query(
     collection(db, MEMBERS_COLLECTION),
     where("boardId", "==", boardId)
   );
-  return onSnapshot(q, (snapshot) => {
-    const members = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...(docSnap.data() as Omit<BoardMember, "id">),
-    }));
-    const roleOrder = {
-      owner: 0,
-      admin: 1,
-      member: 2,
-    };
-    const sortRole = (role: BoardRole) =>
-      role === "owner" ? "owner" : normalizeBoardRole(role);
-    members.sort((a, b) => {
-      const roleDiff =
-        roleOrder[sortRole(a.role)] - roleOrder[sortRole(b.role)];
-      if (roleDiff !== 0) return roleDiff;
-      return a.displayName.localeCompare(b.displayName);
-    });
-    onChange(members);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const members = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data() as Partial<
+            BoardMember & { userId?: unknown; addedAt?: unknown }
+          >;
+          const uid =
+            typeof data.uid === "string"
+              ? data.uid
+              : typeof data.userId === "string"
+                ? data.userId
+                : "";
+          const role =
+            data.role === "owner" || data.role === "admin" || data.role === "member"
+              ? data.role
+              : "member";
+          const displayName =
+            typeof data.displayName === "string" && data.displayName.trim()
+              ? data.displayName
+              : "Member";
+          const email = typeof data.email === "string" ? data.email : "";
+          const joinedAt =
+            typeof data.joinedAt === "number"
+              ? data.joinedAt
+              : typeof data.addedAt === "number"
+                ? data.addedAt
+                : Date.now();
+
+          return {
+            id: docSnap.id,
+            boardId,
+            uid,
+            role,
+            displayName,
+            email,
+            joinedAt,
+          } satisfies BoardMember;
+        })
+        .filter((member) => !!member.uid);
+      const roleOrder = {
+        owner: 0,
+        admin: 1,
+        member: 2,
+      };
+      const sortRole = (role: BoardRole) =>
+        role === "owner" ? "owner" : normalizeBoardRole(role);
+      members.sort((a, b) => {
+        const roleDiff =
+          roleOrder[sortRole(a.role)] - roleOrder[sortRole(b.role)];
+        if (roleDiff !== 0) return roleDiff;
+        return a.displayName.localeCompare(b.displayName);
+      });
+      onChange(members);
+    },
+    (error) => onError?.(error as Error)
+  );
 };
 
 export const subscribeBoardMemberships = (
   uid: string,
   onChange: (memberships: BoardMember[]) => void
 ) => {
-  const q = query(
+  const qUid = query(collection(db, MEMBERS_COLLECTION), where("uid", "==", uid));
+  const qLegacy = query(
     collection(db, MEMBERS_COLLECTION),
-    where("uid", "==", uid)
+    where("userId", "==", uid)
   );
-  return onSnapshot(q, (snapshot) => {
-    const memberships = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...(docSnap.data() as Omit<BoardMember, "id">),
-    }));
-    onChange(memberships);
+
+  let snapUid: QuerySnapshot<DocumentData> | null = null;
+  let snapLegacy: QuerySnapshot<DocumentData> | null = null;
+
+  const rebuild = () => {
+    if (!snapUid && !snapLegacy) return;
+    const byBoardId = new Map<string, BoardMember>();
+
+    const ingest = (snapshot: QuerySnapshot<DocumentData> | null) => {
+      if (!snapshot) return;
+      snapshot.docs.forEach((docSnap) => {
+        const data = docSnap.data() as Partial<
+          BoardMember & { userId?: unknown; addedAt?: unknown }
+        >;
+        const boardId = typeof data.boardId === "string" ? data.boardId : "";
+        if (!boardId) return;
+        const role =
+          data.role === "owner" || data.role === "admin" || data.role === "member"
+            ? data.role
+            : "member";
+        const displayName =
+          typeof data.displayName === "string" && data.displayName.trim()
+            ? data.displayName
+            : "Member";
+        const email = typeof data.email === "string" ? data.email : "";
+        const joinedAt =
+          typeof data.joinedAt === "number"
+            ? data.joinedAt
+            : typeof data.addedAt === "number"
+              ? data.addedAt
+              : Date.now();
+
+        byBoardId.set(boardId, {
+          id: docSnap.id,
+          boardId,
+          uid,
+          role,
+          displayName,
+          email,
+          joinedAt,
+        });
+      });
+    };
+
+    // Legacy first, canonical overwrites
+    ingest(snapLegacy);
+    ingest(snapUid);
+
+    onChange(Array.from(byBoardId.values()));
+  };
+
+  const unsubUid = onSnapshot(qUid, (snapshot) => {
+    snapUid = snapshot;
+    rebuild();
   });
+  const unsubLegacy = onSnapshot(qLegacy, (snapshot) => {
+    snapLegacy = snapshot;
+    rebuild();
+  });
+
+  return () => {
+    unsubUid();
+    unsubLegacy();
+  };
 };
 
 export const sendInvite = async (params: {

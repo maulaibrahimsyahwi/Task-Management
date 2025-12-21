@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/useAuth";
 import { useBoards } from "../../context/useBoards";
 import { useProjects } from "../../context/useProjects";
 
@@ -16,12 +17,31 @@ const describeProjectError = (e: unknown) => {
   return "Failed to create project.";
 };
 
+const describeDeleteProjectError = (e: unknown) => {
+  if (e && typeof e === "object") {
+    const code = "code" in e ? String((e as { code?: unknown }).code) : "";
+    const message =
+      "message" in e ? String((e as { message?: unknown }).message) : "";
+    if (code === "permission-denied") {
+      return (
+        message ||
+        "Permission denied. Make sure `firestore.rules` has been deployed to your Firebase project."
+      );
+    }
+    return message || "Failed to delete project.";
+  }
+  return "Failed to delete project.";
+};
+
+
 const Projects = () => {
+  const { user } = useAuth();
   const {
     projects,
     activeProjectId,
     setActiveProjectId,
     createProject,
+    deleteProject,
     loading,
   } = useProjects();
   const { setActiveBoardId } = useBoards();
@@ -30,6 +50,8 @@ const Projects = () => {
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
@@ -41,7 +63,8 @@ const Projects = () => {
       setDescription("");
       if (created) {
         setActiveBoardId(created.boardId);
-        navigate(`/projects/${created.projectId}`, {
+        // FIX: Gunakan created.projectId, bukan created.id
+        navigate(`/board/${created.projectId}`, {
           state: { initialBoardId: created.boardId },
         });
       }
@@ -49,6 +72,24 @@ const Projects = () => {
       setError(describeProjectError(e));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = async (projectId: string, projectName: string) => {
+    if (deletingId) return;
+    const ok = window.confirm(
+      `Delete project "${projectName}"? This will remove its board, columns, and tasks.`
+    );
+    if (!ok) return;
+
+    setDeleteError(null);
+    setDeletingId(projectId);
+    try {
+      await deleteProject(projectId);
+    } catch (e) {
+      setDeleteError(describeDeleteProjectError(e));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -100,9 +141,16 @@ const Projects = () => {
         </div>
       ) : null}
 
+      {deleteError ? (
+        <div className="text-sm text-gray-700 bg-white rounded-lg border border-gray-100 px-4 py-3 shadow-sm">
+          <span className="text-red-600 font-semibold">Error:</span> {deleteError}
+        </div>
+      ) : null}
+
       <div className="grid md:grid-cols-2 grid-cols-1 gap-4">
         {projects.map((project) => {
           const isActive = activeProjectId === project.id;
+          const isOwner = !!user && project.createdBy === user.uid;
           return (
             <div
               key={project.id}
@@ -135,12 +183,22 @@ const Projects = () => {
                   Select
                 </button>
                 <Link
-                  to={`/projects/${project.id}`}
+                  to={`/board/${project.id}`}
                   onClick={() => setActiveProjectId(project.id)}
                   className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800"
                 >
                   Open
                 </Link>
+                {isOwner ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(project.id, project.name)}
+                    disabled={deletingId === project.id}
+                    className="px-3 py-1.5 rounded-md bg-red-100 text-red-600 text-sm font-semibold hover:bg-red-200 disabled:opacity-60"
+                  >
+                    {deletingId === project.id ? "Deleting..." : "Delete"}
+                  </button>
+                ) : null}
               </div>
             </div>
           );

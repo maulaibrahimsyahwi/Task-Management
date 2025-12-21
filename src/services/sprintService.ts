@@ -132,17 +132,22 @@ export const deleteSprint = async (sprintId: string) => {
 
 export const subscribeSprints = (
   boardId: string,
-  onChange: (sprints: Sprint[]) => void
+  onChange: (sprints: Sprint[]) => void,
+  onError?: (error: Error) => void
 ) => {
   const q = query(
     collection(db, SPRINTS_COLLECTION),
     where("boardId", "==", boardId)
   );
-  return onSnapshot(q, (snapshot) => {
-    const sprints = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...(docSnap.data() as Omit<Sprint, "id">),
-    }));
-    onChange(sortSprints(sprints));
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const sprints = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<Sprint, "id">),
+      }));
+      onChange(sortSprints(sprints));
+    },
+    (error) => onError?.(error as Error)
+  );
 };

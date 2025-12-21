@@ -47,16 +47,22 @@ export const createDefaultColumns = async (boardId: string) => {
 };
 
 export const getBoardData = async (
-  boardId = DEFAULT_BOARD_ID
+  boardId = DEFAULT_BOARD_ID,
+  options?: { autoInit?: boolean }
 ): Promise<Columns> => {
   const colRef = collection(db, COLUMN_COLLECTION);
   const qCol = query(colRef, where("boardId", "==", boardId));
   const colSnap = await getDocs(qCol);
 
+  const autoInit = options?.autoInit !== false;
+
   if (colSnap.empty) {
-    await createDefaultColumns(boardId);
-    // Recursively call to get the data after creation
-    return getBoardData(boardId);
+    if (autoInit) {
+      await createDefaultColumns(boardId);
+      // Recursively call to get the data after creation
+      return getBoardData(boardId, options);
+    }
+    return {};
   }
 
   const taskSnap = await getDocs(
@@ -310,10 +316,11 @@ export const updateColumn = async (
   await updateDoc(doc(db, COLUMN_COLLECTION, columnId), payload);
 };
 
-export const deleteColumn = async (columnId: string) => {
+export const deleteColumn = async (columnId: string, boardId: string) => {
   const colRef = doc(db, COLUMN_COLLECTION, columnId);
   const tasksQ = query(
     collection(db, TASK_COLLECTION),
+    where("boardId", "==", boardId),
     where("status", "==", columnId)
   );
   const taskSnap = await getDocs(tasksQ);
@@ -347,7 +354,8 @@ export const addTask = async (
   const { id, ...taskData } = task;
   const createdAt = Date.now();
   const order = typeof taskData.order === "number" ? taskData.order : createdAt;
-  const docRef = await addDoc(collection(db, TASK_COLLECTION), {
+
+  const rawPayload: Record<string, unknown> = {
     ...taskData,
     deadline:
       typeof taskData.deadline === "number"
@@ -357,7 +365,16 @@ export const addTask = async (
     boardId,
     createdAt,
     order,
+  };
+
+  // Firestore tidak menerima value `undefined`.
+  const payload: Record<string, unknown> = {};
+  Object.entries(rawPayload).forEach(([key, value]) => {
+    if (value === undefined) return;
+    payload[key] = value;
   });
+
+  const docRef = await addDoc(collection(db, TASK_COLLECTION), payload);
   return { id: docRef.id, ...taskData, createdAt, order, boardId };
 };
 

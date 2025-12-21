@@ -4,10 +4,11 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
 import { useBoards } from "../../context/useBoards";
 import { useProjects } from "../../context/useProjects";
+import type { Project } from "../../types/collaboration";
 import Boards from "../Boards";
 import { createBoard, getBoardByProjectId } from "../../services/boardService";
 import { ensureBoardMember } from "../../services/collaborationService";
-import { setProjectDefaultBoard } from "../../services/projectService";
+import { getProjectById, setProjectDefaultBoard } from "../../services/projectService";
 import { createDefaultColumns } from "../../services/taskService";
 
 const describeOpenProjectError = (e: unknown) => {
@@ -31,26 +32,27 @@ const ProjectBoard = () => {
     loading: projectsLoading,
     setActiveProjectId,
   } = useProjects();
-  const { boards, setActiveBoardId, activeBoardId, loading: boardsLoading } =
-    useBoards();
+  const {
+    boards,
+    setActiveBoardId,
+    loading: boardsLoading,
+  } = useBoards();
+
+  const [projectFromDb, setProjectFromDb] = useState<Project | null>(null);
+  const [projectFetching, setProjectFetching] = useState(false);
   const [resolvedBoardId, setResolvedBoardId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Default 'busy' true agar tidak langsung redirect saat data sedang dimuat
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const project = useMemo(() => {
+  const projectFromList = useMemo(() => {
     if (!projectId) return null;
     return projects.find((p) => p.id === projectId) || null;
   }, [projectId, projects]);
 
-  const knownBoardId = useMemo(() => {
-    if (!project) return null;
-    if (typeof project.defaultBoardId === "string" && project.defaultBoardId) {
-      return project.defaultBoardId;
-    }
-    const found = boards.find((b) => b.projectId === project.id);
-    return found?.id ?? null;
-  }, [boards, project]);
+  const project = projectFromList ?? projectFromDb;
 
+  // Set active project segera setelah projectId tersedia
   useEffect(() => {
     if (projectId) {
       setActiveProjectId(projectId);
@@ -58,80 +60,117 @@ const ProjectBoard = () => {
   }, [projectId, setActiveProjectId]);
 
   useEffect(() => {
-    if (!projectId) return;
-    if (!user) return;
-    if (projectsLoading || boardsLoading) return;
-    if (!project) return;
-    if (busy || error) return;
-
-    if (knownBoardId) {
-      setResolvedBoardId(knownBoardId);
-      setActiveBoardId(knownBoardId);
-      void ensureBoardMember(knownBoardId, user, "owner").catch(() => {
-        // ignore
-      });
-      if (!project.defaultBoardId) {
-        void setProjectDefaultBoard(project.id, knownBoardId).catch(() => {
-          // ignore
-        });
-      }
+    if (projectsLoading) return;
+    if (!user || !projectId) return;
+    if (projectFromList) {
+      setProjectFromDb(null);
+      setProjectFetching(false);
       return;
     }
 
     let cancelled = false;
-    const run = async () => {
-      setBusy(true);
-      setError(null);
+    setProjectFetching(true);
+    getProjectById(projectId)
+      .then((fetched) => {
+        if (cancelled) return;
+        setProjectFromDb(fetched);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(describeOpenProjectError(e));
+      })
+      .finally(() => {
+        if (!cancelled) setProjectFetching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectFromList, projectId, projectsLoading, user]);
+
+  useEffect(() => {
+    // 1. Tunggu sampai data dasar (user, projects, boards) selesai loading
+    if (projectsLoading || boardsLoading) return;
+
+    // 2. Validasi dasar
+    if (!user || !projectId) {
+      setBusy(false);
+      return;
+    }
+
+    if (projectFetching) return;
+
+    if (!project) {
+      setBusy(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const prepareBoard = async () => {
       try {
-        const existing = await getBoardByProjectId(project.id);
-        if (cancelled) return;
-        if (existing) {
-          setResolvedBoardId(existing.id);
-          setActiveBoardId(existing.id);
-          try {
-            await ensureBoardMember(existing.id, user, "owner");
-          } catch {
-            // ignore
+        setBusy(true);
+        setError(null);
+
+        // A. Cek apakah project sudah punya referensi board (defaultBoardId)
+        let targetBoardId = project.defaultBoardId;
+
+        // B. Jika belum ada di referensi project, coba cari manual di list boards yang sudah di-load
+        if (!targetBoardId) {
+          const existingBoard = boards.find((b) => b.projectId === project.id);
+          if (existingBoard) {
+            targetBoardId = existingBoard.id;
+            // Perbaiki referensi project agar ke depannya lebih cepat (hanya owner)
+            if (project.createdBy === user.uid) {
+              await setProjectDefaultBoard(project.id, targetBoardId);
+            }
+          } else {
+            // C. Jika di list context tidak ada, coba fetch langsung ke database (jaga-jaga delay sinkronisasi)
+            const fetched = await getBoardByProjectId(project.id);
+            if (fetched) {
+              targetBoardId = fetched.id;
+              if (project.createdBy === user.uid) {
+                await setProjectDefaultBoard(project.id, targetBoardId);
+              }
+            }
           }
-          try {
-            await setProjectDefaultBoard(project.id, existing.id);
-          } catch {
-            // ignore
-          }
-          return;
         }
 
-        if (project.createdBy !== user.uid) {
-          setError(
-            "This project exists but has no linked board available to you."
-          );
-          return;
+        // D. Jika benar-benar belum ada board, buat BARU (Self-healing mechanism)
+        if (!targetBoardId) {
+          // Hanya owner project yang berhak membuat initial board
+          if (project.createdBy === user.uid) {
+            const newBoard = await createBoard({
+              name: project.name, // Nama board disamakan dengan nama project
+              description: project.description,
+              createdBy: user.uid,
+              projectId: project.id,
+            });
+            targetBoardId = newBoard.id;
+
+            // Setup komponen board: Owner Member & Kolom Default
+            await ensureBoardMember(targetBoardId, user, "owner");
+            await createDefaultColumns(targetBoardId);
+
+            // Link board baru ke project
+            await setProjectDefaultBoard(project.id, targetBoardId);
+          } else {
+            throw new Error(
+              "No board exists for this project and you are not the owner to create one."
+            );
+          }
         }
 
-        const created = await createBoard({
-          name: project.name,
-          description: project.description,
-          createdBy: user.uid,
-          projectId: project.id,
-        });
         if (cancelled) return;
-        setResolvedBoardId(created.id);
-        setActiveBoardId(created.id);
-        try {
-          await ensureBoardMember(created.id, user, "owner");
-        } catch {
-          // ignore
+
+        // E. Finalisasi: Pastikan user saat ini punya akses ke board tersebut
+        // Jika user adalah pembuat project, pastikan dia terdaftar sebagai owner di board
+        if (project.createdBy === user.uid) {
+          await ensureBoardMember(targetBoardId, user, "owner");
         }
-        try {
-          await createDefaultColumns(created.id);
-        } catch {
-          // ignore
-        }
-        try {
-          await setProjectDefaultBoard(project.id, created.id);
-        } catch {
-          // ignore
-        }
+
+        // F. Set state lokal dan global
+        setResolvedBoardId(targetBoardId);
+        setActiveBoardId(targetBoardId);
       } catch (e) {
         if (!cancelled) setError(describeOpenProjectError(e));
       } finally {
@@ -139,45 +178,53 @@ const ProjectBoard = () => {
       }
     };
 
-    void run();
+    prepareBoard();
+
     return () => {
       cancelled = true;
     };
   }, [
-    boardsLoading,
-    busy,
-    error,
-    knownBoardId,
-    project,
     projectId,
-    projectsLoading,
-    setActiveBoardId,
+    project,
     user,
+    projectsLoading,
+    boardsLoading,
+    projectFetching,
+    boards,
+    setActiveBoardId,
   ]);
 
-  if (!projectId) {
-    return <Navigate to="/projects" replace />;
-  }
+  // --- RENDER STATES ---
 
-  if (projectsLoading || boardsLoading || busy) {
+  // 1. Loading State
+  if (
+    projectsLoading ||
+    projectFetching ||
+    (boardsLoading && !resolvedBoardId) ||
+    busy
+  ) {
     return (
-      <div className="w-full flex items-center justify-center py-10">
-        <span className="text-lg font-semibold text-gray-100">
-          Opening project...
+      <div className="w-full h-[calc(100vh-64px)] flex flex-col items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500 mb-4"></div>
+        <span className="text-lg font-semibold text-gray-500">
+          Opening project workspace...
         </span>
       </div>
     );
   }
 
+  // 2. Error State
   if (error) {
     return (
-      <div className="w-full bg-white rounded-lg p-5 shadow-sm">
-        <div className="text-red-600 font-semibold">Failed to open project</div>
-        <div className="text-sm text-gray-600 mt-1">{error}</div>
-        <div className="mt-4">
+      <div className="w-full p-8 flex justify-center">
+        <div className="max-w-md w-full bg-white rounded-lg p-6 shadow-sm border border-red-100">
+          <div className="text-red-600 font-bold text-lg mb-2">
+            Failed to open project
+          </div>
+          <p className="text-gray-600 mb-6">{error}</p>
           <Link
             to="/projects"
-            className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-orange-400 text-white font-medium hover:bg-orange-500"
+            className="block w-full text-center py-2 rounded-md bg-gray-100 text-gray-700 font-medium hover:bg-gray-200"
           >
             Back to Projects
           </Link>
@@ -186,17 +233,21 @@ const ProjectBoard = () => {
     );
   }
 
+  // 3. Project Not Found State
   if (!project) {
     return (
-      <div className="w-full bg-white rounded-lg p-5 shadow-sm">
-        <div className="text-red-600 font-semibold">Project not found</div>
-        <div className="text-sm text-gray-600 mt-1">
-          Make sure you have access to this project.
-        </div>
-        <div className="mt-4">
+      <div className="w-full p-8 flex justify-center">
+        <div className="max-w-md w-full bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+          <div className="text-gray-800 font-bold text-lg mb-2">
+            Project not found
+          </div>
+          <p className="text-gray-600 mb-6">
+            The project you are looking for does not exist or you do not have
+            permission to view it.
+          </p>
           <Link
             to="/projects"
-            className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-orange-400 text-white font-medium hover:bg-orange-500"
+            className="block w-full text-center py-2 rounded-md bg-orange-500 text-white font-medium hover:bg-orange-600"
           >
             Back to Projects
           </Link>
@@ -205,19 +256,13 @@ const ProjectBoard = () => {
     );
   }
 
+  // 4. Success State: Render Board
   if (resolvedBoardId) {
-    if (activeBoardId !== resolvedBoardId) {
-      return (
-        <div className="w-full flex items-center justify-center py-10">
-          <span className="text-lg font-semibold text-gray-100">
-            Opening board...
-          </span>
-        </div>
-      );
-    }
-    return <Boards />;
+    // Render komponen Boards yang akan menampilkan kolom dan task
+    return <Boards boardId={resolvedBoardId} />;
   }
 
+  // 5. Fallback
   return <Navigate to="/projects" replace />;
 };
 

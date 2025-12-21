@@ -62,6 +62,20 @@ const deleteByQuery = async (q: ReturnType<typeof query>) => {
   await deleteDocsInBatches(snapshot.docs);
 };
 
+const withFirestoreContext = (error: unknown, context: string) => {
+  if (error && typeof error === "object") {
+    const code = "code" in error ? String((error as { code?: unknown }).code) : "";
+    const message =
+      "message" in error ? String((error as { message?: unknown }).message) : "";
+    const e = new Error(message ? `${context}: ${message}` : context);
+    if (code) {
+      (e as Error & { code?: string }).code = code;
+    }
+    return e;
+  }
+  return new Error(`${context}: ${String(error)}`);
+};
+
 export const createBoard = async (params: {
   name: string;
   description?: string;
@@ -96,34 +110,67 @@ export const updateBoard = async (
 };
 
 export const deleteBoard = async (boardId: string) => {
-  await deleteByQuery(
-    query(collection(db, TASKS_COLLECTION), where("boardId", "==", boardId))
+  const run = async (label: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (e) {
+      throw withFirestoreContext(e, `Failed to delete board (${boardId}) ${label}`);
+    }
+  };
+
+  await run("tasks", async () =>
+    deleteByQuery(
+      query(collection(db, TASKS_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, COLUMNS_COLLECTION), where("boardId", "==", boardId))
+  await run("columns", async () =>
+    deleteByQuery(
+      query(collection(db, COLUMNS_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, MEMBERS_COLLECTION), where("boardId", "==", boardId))
+
+  // Delete membership docs last so rules that rely on membership/role can still validate deletes.
+  await run("invites", async () =>
+    deleteByQuery(
+      query(collection(db, INVITES_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, INVITES_COLLECTION), where("boardId", "==", boardId))
+  await run("activity", async () =>
+    deleteByQuery(
+      query(collection(db, ACTIVITY_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, ACTIVITY_COLLECTION), where("boardId", "==", boardId))
+  await run("comments", async () =>
+    deleteByQuery(
+      query(collection(db, COMMENTS_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, COMMENTS_COLLECTION), where("boardId", "==", boardId))
+  await run("automations", async () =>
+    deleteByQuery(
+      query(
+        collection(db, AUTOMATIONS_COLLECTION),
+        where("boardId", "==", boardId)
+      )
+    )
   );
-  await deleteByQuery(
-    query(collection(db, AUTOMATIONS_COLLECTION), where("boardId", "==", boardId))
+  await run("time logs", async () =>
+    deleteByQuery(
+      query(collection(db, TIMELOGS_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, TIMELOGS_COLLECTION), where("boardId", "==", boardId))
+  await run("sprints", async () =>
+    deleteByQuery(
+      query(collection(db, SPRINTS_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteByQuery(
-    query(collection(db, SPRINTS_COLLECTION), where("boardId", "==", boardId))
+  await run("members", async () =>
+    deleteByQuery(
+      query(collection(db, MEMBERS_COLLECTION), where("boardId", "==", boardId))
+    )
   );
-  await deleteDoc(doc(db, BOARDS_COLLECTION, boardId));
+  await run("board document", async () =>
+    deleteDoc(doc(db, BOARDS_COLLECTION, boardId))
+  );
 };
 
 export const subscribeBoardsByIds = (
