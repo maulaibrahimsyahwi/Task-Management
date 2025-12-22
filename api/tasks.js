@@ -22,8 +22,11 @@ export default async function handler(req, res) {
     if (req.method === "POST") {
       const payload = req.body;
 
-      if (!payload.boardId) {
-        return res.status(400).json({ error: "Missing boardId" });
+      if (!payload.boardId || typeof payload.boardId !== "string") {
+        return res.status(400).json({ error: "Invalid or missing boardId" });
+      }
+      if (!payload.title || typeof payload.title !== "string") {
+        return res.status(400).json({ error: "Invalid or missing title" });
       }
 
       const boardRef = db.collection("boards").doc(payload.boardId);
@@ -49,8 +52,20 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: "Forbidden: Access denied" });
       }
 
-      const docRef = await db.collection(collectionName).add(payload);
-      return res.status(201).json({ id: docRef.id, ...payload });
+      const cleanPayload = {
+        boardId: payload.boardId,
+        title: payload.title,
+        description: payload.description || "",
+        status: payload.status || "todo",
+        priority: payload.priority || "medium",
+        columnId: payload.columnId || null,
+        createdBy: uid,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const docRef = await db.collection(collectionName).add(cleanPayload);
+      return res.status(201).json({ id: docRef.id, ...cleanPayload });
     }
 
     if (req.method === "PUT") {
@@ -85,8 +100,29 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: "Forbidden: Access denied" });
       }
 
-      await taskRef.update(updates);
-      return res.status(200).json({ success: true });
+      const allowedUpdates = [
+        "title",
+        "description",
+        "status",
+        "priority",
+        "columnId",
+        "assignedTo",
+        "dueDate",
+      ];
+
+      const cleanUpdates = {};
+      Object.keys(updates).forEach((key) => {
+        if (allowedUpdates.includes(key)) {
+          cleanUpdates[key] = updates[key];
+        }
+      });
+
+      cleanUpdates.updatedAt = new Date().toISOString();
+
+      await taskRef.update(cleanUpdates);
+      return res
+        .status(200)
+        .json({ success: true, updatedFields: cleanUpdates });
     }
 
     if (req.method === "DELETE") {
