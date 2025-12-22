@@ -1,12 +1,13 @@
 /* eslint-env node */
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 import fs from "fs";
 import path from "path";
 
 // Fungsi untuk memuat Service Account
 function getServiceAccount() {
-  // OPSI 1: Coba baca dari file lokal 'api/service-account.json' (Paling Stabil untuk Localhost)
+  // OPSI 1: Coba baca dari file lokal
   try {
     const localFilePath = path.join(
       process.cwd(),
@@ -14,11 +15,10 @@ function getServiceAccount() {
       "service-account.json"
     );
     if (fs.existsSync(localFilePath)) {
-      const fileContent = fs.readFileSync(localFilePath, "utf8");
       console.log(
         "✅ [API] Menggunakan konfigurasi dari file: api/service-account.json"
       );
-      return JSON.parse(fileContent);
+      return JSON.parse(fs.readFileSync(localFilePath, "utf8"));
     }
   } catch (err) {
     console.warn(
@@ -26,11 +26,10 @@ function getServiceAccount() {
     );
   }
 
-  // OPSI 2: Coba baca dari Environment Variable (Untuk Production / Vercel Deploy)
+  // OPSI 2: Coba baca dari Environment Variable
   const rawEnv = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (rawEnv) {
     try {
-      // Bersihkan tanda kutip pembungkus jika ada (fix untuk masalah sebelumnya)
       let cleanJson = rawEnv.trim();
       if (cleanJson.startsWith("'") && cleanJson.endsWith("'"))
         cleanJson = cleanJson.slice(1, -1);
@@ -57,10 +56,6 @@ if (!serviceAccount) {
   console.error(
     "❌ [FATAL] Tidak ditemukan konfigurasi Service Account Firebase!"
   );
-  console.error("   -> Pastikan ada file 'api/service-account.json' (Local)");
-  console.error(
-    "   -> Atau Environment Variable 'FIREBASE_SERVICE_ACCOUNT_KEY' (Production)"
-  );
 } else if (!getApps().length) {
   try {
     initializeApp({
@@ -73,3 +68,4 @@ if (!serviceAccount) {
 }
 
 export const db = getFirestore();
+export const auth = getAuth();
