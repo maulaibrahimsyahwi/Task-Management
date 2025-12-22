@@ -1,11 +1,54 @@
-import { db } from "./config.js";
+import { db, auth } from "./config.js";
 
 export default async function handler(req, res) {
   const collectionName = "tasks";
 
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized: No token provided" });
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  let uid;
+
+  try {
+    const decodedToken = await auth.verifyIdToken(token);
+    uid = decodedToken.uid;
+  } catch (error) {
+    return res.status(401).json({ error: "Unauthorized: Invalid token" });
+  }
+
   try {
     if (req.method === "POST") {
       const payload = req.body;
+
+      if (!payload.boardId) {
+        return res.status(400).json({ error: "Missing boardId" });
+      }
+
+      const boardRef = db.collection("boards").doc(payload.boardId);
+      const boardSnap = await boardRef.get();
+
+      if (!boardSnap.exists) {
+        return res.status(404).json({ error: "Board not found" });
+      }
+
+      const isOwner = boardSnap.data().createdBy === uid;
+      let hasAccess = isOwner;
+
+      if (!hasAccess) {
+        const memberId = `${payload.boardId}_${uid}`;
+        const memberSnap = await db
+          .collection("boardMembers")
+          .doc(memberId)
+          .get();
+        if (memberSnap.exists) hasAccess = true;
+      }
+
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Forbidden: Access denied" });
+      }
+
       const docRef = await db.collection(collectionName).add(payload);
       return res.status(201).json({ id: docRef.id, ...payload });
     }
@@ -14,7 +57,35 @@ export default async function handler(req, res) {
       const { id, ...updates } = req.body;
       if (!id) return res.status(400).json({ error: "Missing ID" });
 
-      await db.collection(collectionName).doc(id).update(updates);
+      const taskRef = db.collection(collectionName).doc(id);
+      const taskSnap = await taskRef.get();
+
+      if (!taskSnap.exists) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      const taskData = taskSnap.data();
+      const boardId = taskData.boardId;
+
+      const boardSnap = await db.collection("boards").doc(boardId).get();
+      const isOwner = boardSnap.exists && boardSnap.data().createdBy === uid;
+
+      let hasAccess = isOwner;
+
+      if (!hasAccess) {
+        const memberId = `${boardId}_${uid}`;
+        const memberSnap = await db
+          .collection("boardMembers")
+          .doc(memberId)
+          .get();
+        if (memberSnap.exists) hasAccess = true;
+      }
+
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Forbidden: Access denied" });
+      }
+
+      await taskRef.update(updates);
       return res.status(200).json({ success: true });
     }
 
@@ -22,7 +93,35 @@ export default async function handler(req, res) {
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: "Missing ID" });
 
-      await db.collection(collectionName).doc(id).delete();
+      const taskRef = db.collection(collectionName).doc(id);
+      const taskSnap = await taskRef.get();
+
+      if (!taskSnap.exists) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      const taskData = taskSnap.data();
+      const boardId = taskData.boardId;
+
+      const boardSnap = await db.collection("boards").doc(boardId).get();
+      const isOwner = boardSnap.exists && boardSnap.data().createdBy === uid;
+
+      let hasAccess = isOwner;
+
+      if (!hasAccess) {
+        const memberId = `${boardId}_${uid}`;
+        const memberSnap = await db
+          .collection("boardMembers")
+          .doc(memberId)
+          .get();
+        if (memberSnap.exists) hasAccess = true;
+      }
+
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Forbidden: Access denied" });
+      }
+
+      await taskRef.delete();
       return res.status(200).json({ success: true });
     }
 
