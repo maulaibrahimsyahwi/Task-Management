@@ -1,33 +1,18 @@
 import {
-  addDoc,
   collection,
-  deleteDoc,
-  doc,
   documentId,
   getDocs,
   limit,
   onSnapshot,
   query,
-  updateDoc,
   where,
-  writeBatch,
 } from "firebase/firestore";
-import type { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
 import type { Board } from "../types/collaboration";
+import { db, auth } from "../firebase";
 
 const BOARDS_COLLECTION = "boards";
-const MEMBERS_COLLECTION = "boardMembers";
-const INVITES_COLLECTION = "invites";
-const ACTIVITY_COLLECTION = "activity";
-const COLUMNS_COLLECTION = "columns";
-const TASKS_COLLECTION = "tasks";
-const COMMENTS_COLLECTION = "taskComments";
-const SPRINTS_COLLECTION = "sprints";
-const TIMELOGS_COLLECTION = "timeLogs";
-const AUTOMATIONS_COLLECTION = "automations";
 
-const chunkArray = <T,>(arr: T[], size: number) => {
+const chunkArray = <T>(arr: T[], size: number) => {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
     chunks.push(arr.slice(i, i + size));
@@ -43,37 +28,9 @@ const sortBoards = (boards: Board[]) =>
     return a.name.localeCompare(b.name);
   });
 
-const deleteDocsInBatches = async <T>(
-  docs: QueryDocumentSnapshot<T, DocumentData>[]
-) => {
-  const CHUNK = 400;
-  for (let i = 0; i < docs.length; i += CHUNK) {
-    const batch = writeBatch(db);
-    docs.slice(i, i + CHUNK).forEach((docSnap) => {
-      batch.delete(docSnap.ref);
-    });
-    await batch.commit();
-  }
-};
-
-const deleteByQuery = async (q: ReturnType<typeof query>) => {
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return;
-  await deleteDocsInBatches(snapshot.docs);
-};
-
-const withFirestoreContext = (error: unknown, context: string) => {
-  if (error && typeof error === "object") {
-    const code = "code" in error ? String((error as { code?: unknown }).code) : "";
-    const message =
-      "message" in error ? String((error as { message?: unknown }).message) : "";
-    const e = new Error(message ? `${context}: ${message}` : context);
-    if (code) {
-      (e as Error & { code?: string }).code = code;
-    }
-    return e;
-  }
-  return new Error(`${context}: ${String(error)}`);
+const getAuthToken = async () => {
+  if (!auth.currentUser) throw new Error("User not authenticated");
+  return await auth.currentUser.getIdToken();
 };
 
 export const createBoard = async (params: {
@@ -82,95 +39,60 @@ export const createBoard = async (params: {
   createdBy: string;
   projectId: string;
 }) => {
-  const createdAt = Date.now();
-  const payload = {
-    name: params.name.trim() || "Untitled board",
-    description: params.description?.trim() || "",
-    createdAt,
-    updatedAt: createdAt,
-    createdBy: params.createdBy,
-    projectId: params.projectId,
-  };
-  const docRef = await addDoc(collection(db, BOARDS_COLLECTION), payload);
-  return { id: docRef.id, ...payload } as Board;
+  const token = await getAuthToken();
+
+  const response = await fetch("/api/board", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to create board");
+  }
+
+  return await response.json();
 };
 
 export const updateBoard = async (
   boardId: string,
   updates: { name?: string; description?: string }
 ) => {
-  const boardRef = doc(db, BOARDS_COLLECTION, boardId);
-  await updateDoc(boardRef, {
-    ...(updates.name !== undefined ? { name: updates.name.trim() } : {}),
-    ...(updates.description !== undefined
-      ? { description: updates.description.trim() }
-      : {}),
-    updatedAt: Date.now(),
+  const token = await getAuthToken();
+
+  const response = await fetch("/api/board", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ id: boardId, ...updates }),
   });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to update board");
+  }
 };
 
 export const deleteBoard = async (boardId: string) => {
-  const run = async (label: string, fn: () => Promise<void>) => {
-    try {
-      await fn();
-    } catch (e) {
-      throw withFirestoreContext(e, `Failed to delete board (${boardId}) ${label}`);
-    }
-  };
+  const token = await getAuthToken();
 
-  await run("tasks", async () =>
-    deleteByQuery(
-      query(collection(db, TASKS_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("columns", async () =>
-    deleteByQuery(
-      query(collection(db, COLUMNS_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
+  const response = await fetch(`/api/board?id=${boardId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
-  // Delete membership docs last so rules that rely on membership/role can still validate deletes.
-  await run("invites", async () =>
-    deleteByQuery(
-      query(collection(db, INVITES_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("activity", async () =>
-    deleteByQuery(
-      query(collection(db, ACTIVITY_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("comments", async () =>
-    deleteByQuery(
-      query(collection(db, COMMENTS_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("automations", async () =>
-    deleteByQuery(
-      query(
-        collection(db, AUTOMATIONS_COLLECTION),
-        where("boardId", "==", boardId)
-      )
-    )
-  );
-  await run("time logs", async () =>
-    deleteByQuery(
-      query(collection(db, TIMELOGS_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("sprints", async () =>
-    deleteByQuery(
-      query(collection(db, SPRINTS_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("members", async () =>
-    deleteByQuery(
-      query(collection(db, MEMBERS_COLLECTION), where("boardId", "==", boardId))
-    )
-  );
-  await run("board document", async () =>
-    deleteDoc(doc(db, BOARDS_COLLECTION, boardId))
-  );
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete board");
+  }
 };
 
 export const subscribeBoardsByIds = (
