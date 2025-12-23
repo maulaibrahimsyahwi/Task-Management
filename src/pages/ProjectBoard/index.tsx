@@ -8,7 +8,10 @@ import type { Project } from "../../types/collaboration";
 import Boards from "../Boards";
 import { createBoard, getBoardByProjectId } from "../../services/boardService";
 import { ensureBoardMember } from "../../services/collaborationService";
-import { getProjectById, setProjectDefaultBoard } from "../../services/projectService";
+import {
+  getProjectById,
+  setProjectDefaultBoard,
+} from "../../services/projectService";
 import { createDefaultColumns } from "../../services/taskService";
 
 const describeOpenProjectError = (e: unknown) => {
@@ -32,16 +35,11 @@ const ProjectBoard = () => {
     loading: projectsLoading,
     setActiveProjectId,
   } = useProjects();
-  const {
-    boards,
-    setActiveBoardId,
-    loading: boardsLoading,
-  } = useBoards();
+  const { boards, setActiveBoardId, loading: boardsLoading } = useBoards();
 
   const [projectFromDb, setProjectFromDb] = useState<Project | null>(null);
   const [projectFetching, setProjectFetching] = useState(false);
   const [resolvedBoardId, setResolvedBoardId] = useState<string | null>(null);
-  // Default 'busy' true agar tidak langsung redirect saat data sedang dimuat
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +50,6 @@ const ProjectBoard = () => {
 
   const project = projectFromList ?? projectFromDb;
 
-  // Set active project segera setelah projectId tersedia
   useEffect(() => {
     if (projectId) {
       setActiveProjectId(projectId);
@@ -88,10 +85,8 @@ const ProjectBoard = () => {
   }, [projectFromList, projectId, projectsLoading, user]);
 
   useEffect(() => {
-    // 1. Tunggu sampai data dasar (user, projects, boards) selesai loading
     if (projectsLoading || boardsLoading) return;
 
-    // 2. Validasi dasar
     if (!user || !projectId) {
       setBusy(false);
       return;
@@ -111,20 +106,16 @@ const ProjectBoard = () => {
         setBusy(true);
         setError(null);
 
-        // A. Cek apakah project sudah punya referensi board (defaultBoardId)
         let targetBoardId = project.defaultBoardId;
 
-        // B. Jika belum ada di referensi project, coba cari manual di list boards yang sudah di-load
         if (!targetBoardId) {
           const existingBoard = boards.find((b) => b.projectId === project.id);
           if (existingBoard) {
             targetBoardId = existingBoard.id;
-            // Perbaiki referensi project agar ke depannya lebih cepat (hanya owner)
             if (project.createdBy === user.uid) {
               await setProjectDefaultBoard(project.id, targetBoardId);
             }
           } else {
-            // C. Jika di list context tidak ada, coba fetch langsung ke database (jaga-jaga delay sinkronisasi)
             const fetched = await getBoardByProjectId(project.id);
             if (fetched) {
               targetBoardId = fetched.id;
@@ -135,24 +126,20 @@ const ProjectBoard = () => {
           }
         }
 
-        // D. Jika benar-benar belum ada board, buat BARU (Self-healing mechanism)
         if (!targetBoardId) {
-          // Hanya owner project yang berhak membuat initial board
           if (project.createdBy === user.uid) {
             const newBoard = await createBoard({
-              name: project.name, // Nama board disamakan dengan nama project
+              name: project.name,
               description: project.description,
               createdBy: user.uid,
               projectId: project.id,
             });
             targetBoardId = newBoard.id;
 
-            // Setup komponen board: Owner Member & Kolom Default
-            await ensureBoardMember(targetBoardId, user, "owner");
-            await createDefaultColumns(targetBoardId);
+            await ensureBoardMember(newBoard.id, user, "owner");
+            await createDefaultColumns(newBoard.id);
 
-            // Link board baru ke project
-            await setProjectDefaultBoard(project.id, targetBoardId);
+            await setProjectDefaultBoard(project.id, newBoard.id);
           } else {
             throw new Error(
               "No board exists for this project and you are not the owner to create one."
@@ -162,13 +149,14 @@ const ProjectBoard = () => {
 
         if (cancelled) return;
 
-        // E. Finalisasi: Pastikan user saat ini punya akses ke board tersebut
-        // Jika user adalah pembuat project, pastikan dia terdaftar sebagai owner di board
+        if (!targetBoardId) {
+          throw new Error("Failed to resolve board ID.");
+        }
+
         if (project.createdBy === user.uid) {
           await ensureBoardMember(targetBoardId, user, "owner");
         }
 
-        // F. Set state lokal dan global
         setResolvedBoardId(targetBoardId);
         setActiveBoardId(targetBoardId);
       } catch (e) {
@@ -194,9 +182,6 @@ const ProjectBoard = () => {
     setActiveBoardId,
   ]);
 
-  // --- RENDER STATES ---
-
-  // 1. Loading State
   if (
     projectsLoading ||
     projectFetching ||
@@ -213,7 +198,6 @@ const ProjectBoard = () => {
     );
   }
 
-  // 2. Error State
   if (error) {
     return (
       <div className="w-full p-8 flex justify-center">
@@ -233,7 +217,6 @@ const ProjectBoard = () => {
     );
   }
 
-  // 3. Project Not Found State
   if (!project) {
     return (
       <div className="w-full p-8 flex justify-center">
@@ -256,13 +239,10 @@ const ProjectBoard = () => {
     );
   }
 
-  // 4. Success State: Render Board
   if (resolvedBoardId) {
-    // Render komponen Boards yang akan menampilkan kolom dan task
     return <Boards boardId={resolvedBoardId} />;
   }
 
-  // 5. Fallback
   return <Navigate to="/projects" replace />;
 };
 
