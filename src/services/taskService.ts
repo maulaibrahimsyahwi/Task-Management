@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
+import { auth } from "../firebase";
 import { Columns, TaskT, ColumnData } from "../types";
 import { DEFAULT_BOARD_ID } from "./collaborationService";
 
@@ -13,7 +14,13 @@ export const getBoardData = async (
   options?: { autoInit?: boolean }
 ): Promise<Columns> => {
   try {
-    const response = await fetch(`/api/board?boardId=${boardId}`);
+    const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
+    const response = await fetch(`/api/board?boardId=${boardId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
     if (!response.ok) throw new Error("Failed to fetch board data");
 
     const { columns, tasks } = await response.json();
@@ -189,9 +196,13 @@ export const addTask = async (
     order,
   };
 
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
   const response = await fetch("/api/tasks", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify(rawPayload),
   });
 
@@ -204,9 +215,13 @@ export const addTask = async (
 export const updateTask = async (task: TaskT) => {
   const { id, ...taskData } = task;
 
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
   const response = await fetch("/api/tasks", {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({ id, ...taskData }),
   });
 
@@ -217,9 +232,13 @@ export const updateTaskFields = async (
   taskId: string,
   updates: Record<string, unknown>
 ) => {
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
   const response = await fetch("/api/tasks", {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({ id: taskId, ...updates }),
   });
   if (!response.ok) throw new Error("Failed to update task fields");
@@ -234,8 +253,12 @@ export const updateTaskSprint = async (taskId: string, sprintId?: string) => {
 };
 
 export const deleteTask = async (taskId: string) => {
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
   const response = await fetch(`/api/tasks?id=${taskId}`, {
     method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
   if (!response.ok) throw new Error("Failed to delete task");
 };
@@ -273,11 +296,15 @@ export const syncTaskOrders = async (columns: Columns, columnIds: string[]) => {
 
   if (!updates.length) return;
 
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
   await Promise.all(
     updates.map((u) =>
       fetch("/api/tasks", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(u),
       })
     )
